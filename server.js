@@ -286,8 +286,7 @@ async function handleSendReturns(args) {
   const docQuery = `
     SELECT Id, Name, Year__c, Agency__c, Prep_Status__c,
            Case__r.Client__c, Case__r.Client__r.Name, Case__r.Client__r.PersonEmail, 
-           Case__r.Client__r.AlternateEmail__c, Case__r.Client__r.PersonContactId,
-           (SELECT Id, ContentDocumentId FROM ContentDocumentLinks)
+           Case__r.Client__r.AlternateEmail__c, Case__r.Client__r.PersonContactId
     FROM Document__c 
     WHERE Case__c = '${args.caseId}' AND Prep_Status__c = 'Pending Signatures'
   `;
@@ -327,23 +326,39 @@ async function handleSendReturns(args) {
     console.log('⚠️ No client email found, using test email:', recipientEmail);
   }
 
-  // Collect ContentDocument IDs for attachments
+  // Collect ContentDocument IDs for attachments via separate query
   const contentDocumentIds = new Set();
   const documentsToUpdate = [];
+  const documentIds = pendingDocuments.map(doc => doc.Id);
   
+  // Query ContentDocumentLinks separately to avoid relationship issues
+  if (documentIds.length > 0) {
+    try {
+      const linkQuery = `
+        SELECT Id, ContentDocumentId, LinkedEntityId
+        FROM ContentDocumentLink 
+        WHERE LinkedEntityId IN ('${documentIds.join("','")}')
+      `;
+      
+      console.log('📎 ContentDocumentLink query:', linkQuery);
+      const linkResult = await conn.query(linkQuery);
+      
+      for (const link of linkResult.records || []) {
+        contentDocumentIds.add(link.ContentDocumentId);
+      }
+      
+      console.log(`📎 Found ${linkResult.records?.length || 0} ContentDocumentLinks`);
+    } catch (linkError) {
+      console.log('⚠️ Error fetching ContentDocumentLinks:', linkError.message);
+    }
+  }
+  
+  // Mark documents as sent (mimicking existing flow)  
   for (const doc of pendingDocuments) {
-    // Mark document as sent (mimicking existing flow)
     documentsToUpdate.push({
       Id: doc.Id,
       Is_Doc_Sent_To_Client__c: true
     });
-    
-    // Collect attachment IDs
-    if (doc.ContentDocumentLinks) {
-      for (const link of doc.ContentDocumentLinks) {
-        contentDocumentIds.add(link.ContentDocumentId);
-      }
-    }
   }
 
   // Fetch file attachments (mimicking existing ContentVersion query)
