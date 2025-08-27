@@ -71,82 +71,101 @@ app.post('/', async (req, res) => {
       case 'tools/list':
         response.result = {
           tools: [
+            // === Schema Discovery Tools ===
             {
-              name: 'get_pending_signature_cases',
-              description: 'Get tax return cases that are pending client signatures',
+              name: 'sf.describe_global',
+              description: 'List all available Salesforce objects with metadata',
               inputSchema: {
                 type: 'object',
-                properties: {
-                  clientName: { type: 'string', description: 'Client name for filtering (optional)' },
-                  phoneNumber: { type: 'string', description: 'Client phone number for filtering (optional)' },
-                  caseId: { type: 'string', description: 'Specific case ID to look up (optional)' }
-                }
+                properties: {}
               }
             },
             {
-              name: 'send_returns_to_client',
-              description: 'Email tax return documents to client',
+              name: 'sf.describe_sobject',
+              description: 'Get detailed field metadata for a Salesforce object including field types, picklist values, and relationships',
               inputSchema: {
                 type: 'object',
                 properties: {
-                  caseId: { type: 'string', description: 'Case ID to send returns for' }
-                },
-                required: ['caseId']
-              }
-            },
-            {
-              name: 'create_mail_request',
-              description: 'Create a mail request to physically mail tax documents to client',
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  caseId: { type: 'string', description: 'Case ID to create mail request for' }
-                },
-                required: ['caseId']
-              }
-            },
-            {
-              name: 'describe_object_fields',
-              description: 'Describe fields of a Salesforce object',
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  objectName: { type: 'string', description: 'Name of the Salesforce object' }
+                  objectName: { type: 'string', description: 'Name of the Salesforce object (e.g., Account, Document__c, Case__c)' }
                 },
                 required: ['objectName']
               }
             },
+            
+            // === Data Query & Manipulation Tools ===
             {
-              name: 'create_tax_return_documents',
-              description: 'Create Document__c records for tax returns',
+              name: 'sf.query',
+              description: 'Execute SOQL query against Salesforce. Use this to find records, check existing data patterns, etc.',
               inputSchema: {
                 type: 'object',
                 properties: {
-                  caseId: { type: 'string', description: 'Case__c ID' },
-                  years: { type: 'array', items: { type: 'string' }, description: 'Tax years (e.g., ["2020", "2021"])' }
+                  soql: { type: 'string', description: 'SOQL query string (e.g., "SELECT Id, Name FROM Account LIMIT 10")' },
+                  limit: { type: 'number', description: 'Maximum records to return (default 50, max 200)', default: 50 }
                 },
-                required: ['caseId', 'years']
+                required: ['soql']
               }
             },
             {
-              name: 'list_case_custom_objects',
-              description: 'List Case__c custom object records',
+              name: 'sf.create',
+              description: 'Create one or more records in Salesforce. Use sf.describe_sobject first to understand required fields and data types.',
               inputSchema: {
                 type: 'object',
                 properties: {
-                  limit: { type: 'number', description: 'Number of records to return (default 10)' }
-                }
+                  objectName: { type: 'string', description: 'Salesforce object name (e.g., Document__c, Account, Case__c)' },
+                  records: { 
+                    type: 'array', 
+                    description: 'Array of record objects to create. Each object should contain field names and values.',
+                    items: { type: 'object' }
+                  }
+                },
+                required: ['objectName', 'records']
               }
             },
             {
-              name: 'debug_case_data',
-              description: 'Debug case data by fetching raw data',
+              name: 'sf.update',
+              description: 'Update existing records in Salesforce. Include Id field in each record.',
               inputSchema: {
                 type: 'object',
                 properties: {
-                  caseId: { type: 'string', description: 'Case ID to debug' }
+                  objectName: { type: 'string', description: 'Salesforce object name' },
+                  records: { 
+                    type: 'array',
+                    description: 'Array of record objects to update. Each must include Id field and fields to update.',
+                    items: { 
+                      type: 'object',
+                      properties: {
+                        Id: { type: 'string', description: 'Salesforce record ID' }
+                      },
+                      required: ['Id']
+                    }
+                  }
+                },
+                required: ['objectName', 'records']
+              }
+            },
+            
+            // === Business Logic Tools ===
+            {
+              name: 'send_returns_to_client',
+              description: 'Email tax return documents to client with TaxRise branding and attachments',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  caseId: { type: 'string', description: 'Case__c ID to send returns for' }
                 },
                 required: ['caseId']
+              }
+            },
+            
+            // === Knowledge Base Tools ===
+            {
+              name: 'kb.document_taxonomy',
+              description: 'Get document categories and types for proper classification',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  category: { type: 'string', description: 'Optional: filter by category (e.g., "Tax Prep", "Bank Statements")' }
+                }
               }
             }
           ]
@@ -157,32 +176,36 @@ app.post('/', async (req, res) => {
         const { name, arguments: args } = params;
         
         switch (name) {
-          case 'get_pending_signature_cases':
-            response.result = await handleGetPendingCases(args);
+          // Schema Discovery Tools
+          case 'sf.describe_global':
+            response.result = await handleDescribeGlobal(args);
             break;
             
+          case 'sf.describe_sobject':
+            response.result = await handleDescribeObject(args);
+            break;
+          
+          // Data Operations
+          case 'sf.query':
+            response.result = await handleQuery(args);
+            break;
+            
+          case 'sf.create':
+            response.result = await handleCreate(args);
+            break;
+            
+          case 'sf.update':
+            response.result = await handleUpdate(args);
+            break;
+          
+          // Business Logic Tools  
           case 'send_returns_to_client':
             response.result = await handleSendReturns(args);
             break;
-            
-          case 'create_mail_request':
-            response.result = await handleCreateMailRequest(args);
-            break;
-
-          case 'describe_object_fields':
-            response.result = await handleDescribeObjectFields(args);
-            break;
-
-          case 'create_tax_return_documents':
-            response.result = await handleCreateTaxReturnDocuments(args);
-            break;
-
-          case 'list_case_custom_objects':
-            response.result = await handleListCaseCustomObjects(args);
-            break;
-
-          case 'debug_case_data':
-            response.result = await handleDebugCaseData(args);
+          
+          // Knowledge Base Tools
+          case 'kb.document_taxonomy':
+            response.result = await handleDocumentTaxonomy(args);
             break;
             
           default:
@@ -201,7 +224,244 @@ app.post('/', async (req, res) => {
   res.json(response);
 });
 
-// Tool implementations with real Salesforce data
+// === Schema Discovery Tools ===
+async function handleDescribeGlobal(args) {
+  try {
+    console.log('🌍 Getting global Salesforce object list');
+    const globalDesc = await conn.describeGlobal();
+    
+    // Return curated list with key metadata
+    const objects = globalDesc.sobjects
+      .filter(obj => obj.queryable && obj.createable) // Only show actionable objects
+      .map(obj => ({
+        name: obj.name,
+        label: obj.label,
+        queryable: obj.queryable,
+        createable: obj.createable,
+        updateable: obj.updateable,
+        deletable: obj.deletable,
+        custom: obj.custom
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    return {
+      content: [{
+        type: 'text', 
+        text: `Found ${objects.length} queryable Salesforce objects:\n${JSON.stringify(objects, null, 2)}`
+      }]
+    };
+  } catch (error) {
+    console.error('❌ Error describing global:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `Error getting Salesforce objects: ${error.message}`
+      }]
+    };
+  }
+}
+
+async function handleDescribeObject(args) {
+  try {
+    console.log(`🔍 Describing Salesforce object: ${args.objectName}`);
+    const objectDesc = await conn.sobject(args.objectName).describe();
+    
+    // Extract key metadata
+    const metadata = {
+      name: objectDesc.name,
+      label: objectDesc.label, 
+      createable: objectDesc.createable,
+      updateable: objectDesc.updateable,
+      queryable: objectDesc.queryable,
+      deletable: objectDesc.deletable,
+      fields: objectDesc.fields.map(field => ({
+        name: field.name,
+        label: field.label,
+        type: field.type,
+        required: !field.nillable && !field.defaultedOnCreate,
+        picklistValues: field.picklistValues?.map(pv => pv.value) || [],
+        relationshipName: field.relationshipName || null,
+        referenceTo: field.referenceTo || []
+      })).sort((a, b) => a.label.localeCompare(b.label))
+    };
+
+    return {
+      content: [{
+        type: 'text',
+        text: `Schema for ${args.objectName}:\n${JSON.stringify(metadata, null, 2)}`
+      }]
+    };
+  } catch (error) {
+    console.error(`❌ Error describing ${args.objectName}:`, error);
+    return {
+      content: [{
+        type: 'text',
+        text: `Error describing ${args.objectName}: ${error.message}`
+      }]
+    };
+  }
+}
+
+// === Data Operations ===
+async function handleQuery(args) {
+  try {
+    console.log(`📋 Executing SOQL: ${args.soql}`);
+    
+    // Apply limit safety
+    const limit = Math.min(args.limit || 50, 200);
+    let soql = args.soql.trim();
+    
+    // Add LIMIT if not present
+    if (!soql.toUpperCase().includes('LIMIT')) {
+      soql += ` LIMIT ${limit}`;
+    }
+    
+    const result = await conn.query(soql);
+    
+    return {
+      content: [{
+        type: 'text',
+        text: `Query returned ${result.records.length} records:\n${JSON.stringify(result.records, null, 2)}`
+      }]
+    };
+  } catch (error) {
+    console.error('❌ SOQL Error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `SOQL Error: ${error.message}`
+      }]
+    };
+  }
+}
+
+async function handleCreate(args) {
+  try {
+    console.log(`➕ Creating ${args.records.length} ${args.objectName} records`);
+    console.log('📄 Records to create:', JSON.stringify(args.records, null, 2));
+    
+    const result = await conn.sobject(args.objectName).create(args.records);
+    const results = Array.isArray(result) ? result : [result];
+    
+    const successful = results.filter(r => r.success);
+    const failed = results.filter(r => !r.success);
+    
+    let responseText = `✅ Created ${successful.length}/${results.length} ${args.objectName} records successfully`;
+    
+    if (successful.length > 0) {
+      responseText += `\n\nSuccessful records:\n${JSON.stringify(successful, null, 2)}`;
+    }
+    
+    if (failed.length > 0) {
+      responseText += `\n\n❌ Failed records:\n${JSON.stringify(failed, null, 2)}`;
+    }
+    
+    return {
+      content: [{
+        type: 'text',
+        text: responseText
+      }]
+    };
+  } catch (error) {
+    console.error('❌ Create Error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `Error creating ${args.objectName} records: ${error.message}`
+      }]
+    };
+  }
+}
+
+async function handleUpdate(args) {
+  try {
+    console.log(`✏️ Updating ${args.records.length} ${args.objectName} records`);
+    console.log('📄 Records to update:', JSON.stringify(args.records, null, 2));
+    
+    const result = await conn.sobject(args.objectName).update(args.records);
+    const results = Array.isArray(result) ? result : [result];
+    
+    const successful = results.filter(r => r.success);
+    const failed = results.filter(r => !r.success);
+    
+    let responseText = `✅ Updated ${successful.length}/${results.length} ${args.objectName} records successfully`;
+    
+    if (failed.length > 0) {
+      responseText += `\n\n❌ Failed updates:\n${JSON.stringify(failed, null, 2)}`;
+    }
+    
+    return {
+      content: [{
+        type: 'text',
+        text: responseText
+      }]
+    };
+  } catch (error) {
+    console.error('❌ Update Error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `Error updating ${args.objectName} records: ${error.message}`
+      }]
+    };
+  }
+}
+
+// === Knowledge Base Tools ===
+async function handleDocumentTaxonomy(args) {
+  // Document taxonomy from your JSON file
+  const taxonomy = {
+    "categories": {
+      "Tax Prep": {
+        "document_types": [
+          "Federal Signed Return", "State Signed Return", "Copy of Tax Returns", 
+          "Unsigned", "Signed", "Tax Organizer", "W2", "1099-MISC", "1099-NEC", 
+          "1098", "1098-T", "K-1", "Schedule A", "Prior Year Depreciation"
+        ]
+      },
+      "Bank Statements": {
+        "document_types": ["Business", "Investment Accounts", "Personal", "Spouse"]
+      },
+      "Collection Notice": {
+        "document_types": ["Collection Notice", "Garnishment Notice", "Levy Notice", "Lien Notice"]
+      },
+      "Expense Documents": {
+        "document_types": [
+          "Auto Insurance", "Mortgage Statement", "Rent Statement", "Property Tax",
+          "Electric Bill", "Gas Bill", "Water Bill", "Phone Bill", "Internet Bill"
+        ]
+      }
+    }
+  };
+  
+  if (args.category) {
+    const category = taxonomy.categories[args.category];
+    if (category) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Document types for ${args.category}:\n${JSON.stringify(category.document_types, null, 2)}`
+        }]
+      };
+    } else {
+      return {
+        content: [{
+          type: 'text', 
+          text: `Category "${args.category}" not found. Available categories: ${Object.keys(taxonomy.categories).join(', ')}`
+        }]
+      };
+    }
+  }
+  
+  return {
+    content: [{
+      type: 'text',
+      text: `Document Taxonomy:\n${JSON.stringify(taxonomy, null, 2)}`
+    }]
+  };
+}
+
+// === Business Logic Tools (kept from previous) ===
 async function handleGetPendingCases(args) {
   console.log('🔍 handleGetPendingCases called with args:', JSON.stringify(args, null, 2));
   
@@ -606,7 +866,9 @@ async function handleCreateTaxReturnDocuments(args) {
         Case__c: args.caseId,
         Year__c: year,
         Agency__c: 'IRS',
-        Prep_Status__c: 'Pending Signatures'
+        Prep_Status__c: 'Pending Signatures',
+        Doc_Category__c: 'Tax prep',
+        Doc_Type__c: 'tax return'
       });
 
       // Create State document
@@ -614,7 +876,9 @@ async function handleCreateTaxReturnDocuments(args) {
         Case__c: args.caseId,
         Year__c: year,
         Agency__c: 'State',
-        Prep_Status__c: 'Pending Signatures'
+        Prep_Status__c: 'Pending Signatures',
+        Doc_Category__c: 'Tax prep',
+        Doc_Type__c: 'tax return'
       });
     }
 
@@ -712,13 +976,17 @@ async function handleDebugCaseData(args) {
 }
 
 app.listen(port, () => {
-  console.log(`🚀 Tax Prep MCP Server (Fresh) with Document__c integration running on port ${port}`);
-  console.log('📋 Available tools with Salesforce integration:');
-  console.log('  - get_pending_signature_cases');
-  console.log('  - send_returns_to_client');
-  console.log('  - create_mail_request');
-  console.log('  - describe_object_fields');
-  console.log('  - create_tax_return_documents');
-  console.log('  - list_case_custom_objects');
-  console.log('  - debug_case_data');
+  console.log(`🚀 Schema-Aware MCP Server with Dynamic Salesforce Integration running on port ${port}`);
+  console.log('📋 Available tools:');
+  console.log('  🔍 Schema Discovery:');
+  console.log('    - sf.describe_global (list all objects)');
+  console.log('    - sf.describe_sobject (get field metadata)');
+  console.log('  📊 Data Operations:');
+  console.log('    - sf.query (execute SOQL)');
+  console.log('    - sf.create (create records)');
+  console.log('    - sf.update (update records)');
+  console.log('  💼 Business Logic:');
+  console.log('    - send_returns_to_client (email with attachments)');
+  console.log('  📚 Knowledge Base:');
+  console.log('    - kb.document_taxonomy (document categories & types)');
 });
