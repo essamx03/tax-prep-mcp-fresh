@@ -155,31 +155,41 @@ async function handleGetPendingCases(args) {
     whereClause += ` AND (Contact.Phone = '${args.phoneNumber}' OR Contact.MobilePhone = '${args.phoneNumber}')`;
   }
 
-  const query = `
+  // First query to get cases
+  const caseQuery = `
     SELECT Id, CaseNumber, Subject, Account.Name, Contact.Name, Contact.Email, 
-           Contact.Phone, Contact.MobilePhone,
-           (SELECT Id, Year__c, ReturnStatus__c, Agency__c, FilingMethod__c 
-            FROM TaxPrepInformation__r 
-            WHERE ReturnStatus__c = 'Unsigned') 
+           Contact.Phone, Contact.MobilePhone
     FROM Case 
     WHERE ${whereClause}
     ORDER BY CreatedDate DESC
     LIMIT 10
   `;
 
-  const result = await conn.query(query);
+  const caseResult = await conn.query(caseQuery);
   
-  const cases = result.records.map(record => ({
-    caseId: record.Id,
-    caseNumber: record.CaseNumber,
-    clientName: record.Account?.Name,
-    contactName: record.Contact?.Name,
-    clientEmail: record.Contact?.Email,
-    clientPhone: record.Contact?.Phone,
-    clientMobile: record.Contact?.MobilePhone,
-    pendingYears: record.TaxPrepInformation__r?.records?.map(tax => tax.Year__c) || [],
-    totalPendingYears: record.TaxPrepInformation__r?.records?.length || 0
-  }));
+  // Get tax prep info for each case
+  const cases = [];
+  for (const caseRecord of caseResult.records) {
+    const taxQuery = `
+      SELECT Id, Year__c, ReturnStatus__c, Agency__c, FilingMethod__c 
+      FROM TaxPrepInformation__c 
+      WHERE Case__c = '${caseRecord.Id}' AND ReturnStatus__c = 'Unsigned'
+    `;
+    
+    const taxResult = await conn.query(taxQuery);
+    
+    cases.push({
+      caseId: caseRecord.Id,
+      caseNumber: caseRecord.CaseNumber,
+      clientName: caseRecord.Account?.Name,
+      contactName: caseRecord.Contact?.Name,
+      clientEmail: caseRecord.Contact?.Email,
+      clientPhone: caseRecord.Contact?.Phone,
+      clientMobile: caseRecord.Contact?.MobilePhone,
+      pendingYears: taxResult.records?.map(tax => tax.Year__c) || [],
+      totalPendingYears: taxResult.records?.length || 0
+    });
+  }
 
   return {
     content: [{
@@ -192,8 +202,7 @@ async function handleGetPendingCases(args) {
 async function handleSendReturns(args) {
   // Get case and contact info
   const caseQuery = `
-    SELECT Id, Contact.Name, Contact.Email,
-           (SELECT Id, Year__c, ReturnStatus__c FROM TaxPrepInformation__r WHERE ReturnStatus__c = 'Unsigned')
+    SELECT Id, Contact.Name, Contact.Email
     FROM Case WHERE Id = '${args.caseId}'
   `;
   
@@ -205,7 +214,16 @@ async function handleSendReturns(args) {
   const caseRecord = caseResult.records[0];
   const clientEmail = caseRecord.Contact?.Email;
   const clientName = caseRecord.Contact?.Name;
-  const unsignedReturns = caseRecord.TaxPrepInformation__r?.records || [];
+  
+  // Get tax prep info separately
+  const taxQuery = `
+    SELECT Id, Year__c, ReturnStatus__c 
+    FROM TaxPrepInformation__c 
+    WHERE Case__c = '${args.caseId}' AND ReturnStatus__c = 'Unsigned'
+  `;
+  
+  const taxResult = await conn.query(taxQuery);
+  const unsignedReturns = taxResult.records || [];
   
   if (!clientEmail) {
     throw new Error('No email address found for client');
@@ -239,8 +257,7 @@ async function handleSendReturns(args) {
 async function handleCreateMailRequest(args) {
   // Get case and contact info
   const caseQuery = `
-    SELECT Id, ContactId, Contact.Name, Contact.MailingAddress,
-           (SELECT Id, Year__c, ReturnStatus__c FROM TaxPrepInformation__r WHERE ReturnStatus__c = 'Unsigned')
+    SELECT Id, ContactId, Contact.Name, Contact.MailingAddress
     FROM Case WHERE Id = '${args.caseId}'
   `;
   
@@ -250,7 +267,16 @@ async function handleCreateMailRequest(args) {
   }
   
   const caseRecord = caseResult.records[0];
-  const unsignedReturns = caseRecord.TaxPrepInformation__r?.records || [];
+  
+  // Get tax prep info separately
+  const taxQuery = `
+    SELECT Id, Year__c, ReturnStatus__c 
+    FROM TaxPrepInformation__c 
+    WHERE Case__c = '${args.caseId}' AND ReturnStatus__c = 'Unsigned'
+  `;
+  
+  const taxResult = await conn.query(taxQuery);
+  const unsignedReturns = taxResult.records || [];
   const years = unsignedReturns.map(r => r.Year__c).join(', ');
   
   // Create mail request (simulated for now - you can add real Salesforce record creation here)
