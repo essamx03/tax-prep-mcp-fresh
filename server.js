@@ -167,6 +167,31 @@ app.post('/', async (req, res) => {
                   category: { type: 'string', description: 'Optional: filter by category (e.g., "Tax Prep", "Bank Statements")' }
                 }
               }
+            },
+            {
+              name: 'kb.intent_to_fields',
+              description: 'Map user intents to required Salesforce field combinations. Use this to understand what fields to set based on what the user wants to do.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  intent: { type: 'string', description: 'User intent (e.g., "file tax return", "upload bank statement", "create collection notice")' },
+                  objectName: { type: 'string', description: 'Target Salesforce object (e.g., "Document__c")' }
+                },
+                required: ['intent', 'objectName']
+              }
+            },
+            {
+              name: 'kb.discover_patterns',
+              description: 'Query existing Salesforce data to discover field patterns and business rules. Use this to learn from existing records.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  objectName: { type: 'string', description: 'Salesforce object to analyze (e.g., "Document__c")' },
+                  intent: { type: 'string', description: 'What pattern to discover (e.g., "tax return records", "bank statement records")' },
+                  sampleSize: { type: 'number', description: 'Number of records to analyze (default 10)', default: 10 }
+                },
+                required: ['objectName', 'intent']
+              }
             }
           ]
         };
@@ -206,6 +231,14 @@ app.post('/', async (req, res) => {
           // Knowledge Base Tools
           case 'kb.document_taxonomy':
             response.result = await handleDocumentTaxonomy(args);
+            break;
+            
+          case 'kb.intent_to_fields':
+            response.result = await handleIntentToFields(args);
+            break;
+            
+          case 'kb.discover_patterns':
+            response.result = await handleDiscoverPatterns(args);
             break;
             
           default:
@@ -459,6 +492,173 @@ async function handleDocumentTaxonomy(args) {
       text: `Document Taxonomy:\n${JSON.stringify(taxonomy, null, 2)}`
     }]
   };
+}
+
+async function handleIntentToFields(args) {
+  // Intent-to-field mapping rules for business logic
+  const intentMappings = {
+    "Document__c": {
+      "file tax return": {
+        required_fields: {
+          "Doc_Category__c": "Tax Prep",
+          "Doc_Type__c": "Tax Return"
+        },
+        conditional_fields: {
+          "Agency__c": "IRS or State (based on user request)",
+          "Year__c": "Tax year from user input",
+          "Prep_Status__c": "Pending Signatures (default for new tax returns)"
+        },
+        business_rule: "Creates records that appear in Tax Prep table for signature workflow"
+      },
+      "file tax organizer": {
+        required_fields: {
+          "Doc_Category__c": "Tax Prep", 
+          "Doc_Type__c": "Tax Organizer"
+        },
+        business_rule: "Creates tax organizer documents for data collection"
+      },
+      "upload bank statement": {
+        required_fields: {
+          "Doc_Category__c": "Bank Statements",
+          "Doc_Type__c": "Personal" // or Business, Investment, Spouse
+        },
+        business_rule: "Creates bank statement documents for tax preparation"
+      },
+      "create collection notice": {
+        required_fields: {
+          "Doc_Category__c": "Collection Notice",
+          "Doc_Type__c": "Collection Notice" // or Garnishment, Levy, Lien
+        },
+        business_rule: "Creates collection-related documents for tax resolution"
+      },
+      "upload expense document": {
+        required_fields: {
+          "Doc_Category__c": "Expense Documents"
+        },
+        conditional_fields: {
+          "Doc_Type__c": "Varies (Mortgage Statement, Auto Insurance, etc.)"
+        },
+        business_rule: "Creates expense documentation for tax deductions"
+      }
+    }
+  };
+
+  const objectMappings = intentMappings[args.objectName];
+  if (!objectMappings) {
+    return {
+      content: [{
+        type: 'text',
+        text: `No intent mappings found for ${args.objectName}. Available objects: ${Object.keys(intentMappings).join(', ')}`
+      }]
+    };
+  }
+
+  const intentMapping = objectMappings[args.intent.toLowerCase()];
+  if (intentMapping) {
+    return {
+      content: [{
+        type: 'text',
+        text: `Intent mapping for "${args.intent}" on ${args.objectName}:\n${JSON.stringify(intentMapping, null, 2)}`
+      }]
+    };
+  }
+
+  // Show available intents if not found
+  const availableIntents = Object.keys(objectMappings);
+  return {
+    content: [{
+      type: 'text',
+      text: `Intent "${args.intent}" not found for ${args.objectName}.\n\nAvailable intents:\n${availableIntents.join(', ')}\n\nAll mappings:\n${JSON.stringify(objectMappings, null, 2)}`
+    }]
+  };
+}
+
+async function handleDiscoverPatterns(args) {
+  try {
+    console.log(`🔍 Discovering patterns for ${args.intent} in ${args.objectName}`);
+    
+    // Create query based on intent
+    let soql = '';
+    const sampleSize = Math.min(args.sampleSize || 10, 20); // Safety limit
+    
+    if (args.intent.toLowerCase().includes('tax return')) {
+      soql = `SELECT Doc_Category__c, Doc_Type__c, Agency__c, Prep_Status__c, Year__c FROM ${args.objectName} WHERE Doc_Category__c = 'Tax Prep' AND Doc_Type__c LIKE '%Return%' ORDER BY CreatedDate DESC LIMIT ${sampleSize}`;
+    } else if (args.intent.toLowerCase().includes('bank statement')) {
+      soql = `SELECT Doc_Category__c, Doc_Type__c FROM ${args.objectName} WHERE Doc_Category__c = 'Bank Statements' ORDER BY CreatedDate DESC LIMIT ${sampleSize}`;
+    } else if (args.intent.toLowerCase().includes('collection')) {
+      soql = `SELECT Doc_Category__c, Doc_Type__c FROM ${args.objectName} WHERE Doc_Category__c = 'Collection Notice' ORDER BY CreatedDate DESC LIMIT ${sampleSize}`;
+    } else {
+      // Generic pattern discovery
+      soql = `SELECT Doc_Category__c, Doc_Type__c, Agency__c, Prep_Status__c FROM ${args.objectName} ORDER BY CreatedDate DESC LIMIT ${sampleSize}`;
+    }
+
+    console.log(`📋 Pattern discovery query: ${soql}`);
+    const result = await conn.query(soql);
+    
+    if (!result.records.length) {
+      return {
+        content: [{
+          type: 'text',
+          text: `No existing records found to analyze patterns for "${args.intent}" in ${args.objectName}`
+        }]
+      };
+    }
+
+    // Analyze patterns
+    const patterns = {};
+    const fieldCombinations = {};
+    
+    for (const record of result.records) {
+      // Count field value combinations
+      const combo = JSON.stringify({
+        Doc_Category__c: record.Doc_Category__c,
+        Doc_Type__c: record.Doc_Type__c,
+        Agency__c: record.Agency__c || null
+      });
+      
+      fieldCombinations[combo] = (fieldCombinations[combo] || 0) + 1;
+      
+      // Track individual field patterns
+      ['Doc_Category__c', 'Doc_Type__c', 'Agency__c', 'Prep_Status__c'].forEach(field => {
+        if (record[field]) {
+          if (!patterns[field]) patterns[field] = {};
+          patterns[field][record[field]] = (patterns[field][record[field]] || 0) + 1;
+        }
+      });
+    }
+
+    // Find most common combination
+    const sortedCombos = Object.entries(fieldCombinations)
+      .sort(([,a], [,b]) => b - a)
+      .map(([combo, count]) => ({ pattern: JSON.parse(combo), frequency: count, percentage: Math.round(count/result.records.length*100) }));
+
+    const analysis = {
+      intent: args.intent,
+      objectName: args.objectName,
+      samplesAnalyzed: result.records.length,
+      mostCommonPatterns: sortedCombos.slice(0, 3),
+      fieldFrequency: patterns,
+      recommendation: sortedCombos[0] ? 
+        `For "${args.intent}", most records use: ${JSON.stringify(sortedCombos[0].pattern)}` :
+        'No clear pattern found'
+    };
+
+    return {
+      content: [{
+        type: 'text',
+        text: `Pattern analysis for "${args.intent}" in ${args.objectName}:\n${JSON.stringify(analysis, null, 2)}`
+      }]
+    };
+    
+  } catch (error) {
+    console.error('❌ Pattern discovery error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `Error discovering patterns: ${error.message}`
+      }]
+    };
+  }
 }
 
 // === Business Logic Tools (kept from previous) ===
@@ -989,4 +1189,6 @@ app.listen(port, () => {
   console.log('    - send_returns_to_client (email with attachments)');
   console.log('  📚 Knowledge Base:');
   console.log('    - kb.document_taxonomy (document categories & types)');
+  console.log('    - kb.intent_to_fields (map user intents to field requirements)');
+  console.log('    - kb.discover_patterns (learn from existing data)');
 });
