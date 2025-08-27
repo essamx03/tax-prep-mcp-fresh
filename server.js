@@ -41,7 +41,12 @@ app.use((req, res, next) => {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', server: 'tax-prep-mcp-fresh', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    server: 'tax-prep-mcp-fresh-with-salesforce', 
+    version: '2.0.0',
+    timestamp: new Date().toISOString() 
+  });
 });
 
 // MCP endpoint handler
