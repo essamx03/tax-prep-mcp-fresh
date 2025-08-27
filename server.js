@@ -255,17 +255,28 @@ async function handleGetPendingCases(args) {
   for (const caseRecord of caseResult.records) {
     const caseDocuments = documentResult.records.filter(doc => doc.Case__c === caseRecord.Id);
     
+    // Deduplicate years and sort them
+    const uniqueYears = [...new Set(caseDocuments.map(doc => doc.Year__c))].filter(Boolean).sort();
+    
+    // Group documents by year for cleaner presentation
+    const documentsByYear = {};
+    for (const doc of caseDocuments) {
+      if (!documentsByYear[doc.Year__c]) {
+        documentsByYear[doc.Year__c] = [];
+      }
+      documentsByYear[doc.Year__c].push({
+        name: doc.Name,
+        agency: doc.Agency__c
+      });
+    }
+    
     cases.push({
       caseId: caseRecord.Id,
       caseName: caseRecord.Name,
-      pendingYears: caseDocuments.map(doc => doc.Year__c),
-      pendingDocuments: caseDocuments.map(doc => ({ 
-        name: doc.Name, 
-        year: doc.Year__c, 
-        agency: doc.Agency__c,
-        status: doc.Prep_Status__c 
-      })),
-      totalPendingDocuments: caseDocuments.length
+      pendingYears: uniqueYears,
+      documentsByYear: documentsByYear,
+      totalPendingDocuments: caseDocuments.length,
+      summary: `${uniqueYears.length} tax years (${uniqueYears.join(', ')}) with ${caseDocuments.length} documents awaiting signatures`
     });
   }
 
