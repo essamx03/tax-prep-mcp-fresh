@@ -5,10 +5,10 @@ import nodemailer from 'nodemailer';
 const app = express();
 const port = process.env.PORT || 3002;
 
-// Salesforce connection using access token
+// Salesforce connection using environment variables
 const conn = new jsforce.Connection({
-  instanceUrl: 'https://taxrise--dustin.sandbox.my.salesforce.com',
-  accessToken: '00DO800000AQRYH!AQEAQFl49y8HDsJAkjSjiq7akPeWHHbMKLO8y3q1Qy9hu_uCkTz6rG0t4K7ZVhh06ETNng7v6Nv2AyzCA.5Ym__bvNF09F1V'
+  instanceUrl: process.env.SF_INSTANCE_URL || 'https://taxrise--dustin.sandbox.my.salesforce.com',
+  accessToken: process.env.SF_ACCESS_TOKEN || '00DO800000AQRYH!AQEAQFl49y8HDsJAkjSjiq7akPeWHHbMKLO8y3q1Qy9hu_uCkTz6rG0t4K7ZVhh06ETNng7v6Nv2AyzCA.5Ym__bvNF09F1V'
 });
 
 // Email configuration
