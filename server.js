@@ -280,63 +280,217 @@ async function handleGetPendingCases(args) {
 }
 
 async function handleSendReturns(args) {
-  // Get Case__c custom object info
-  const caseQuery = `
-    SELECT Id, Name
-    FROM Case__c WHERE Id = '${args.caseId}'
-  `;
+  console.log('📧 handleSendReturns called with args:', JSON.stringify(args, null, 2));
   
-  const caseResult = await conn.query(caseQuery);
-  if (!caseResult.records.length) {
-    throw new Error('Case__c not found');
-  }
-  
-  const caseRecord = caseResult.records[0];
-  
-  // Use test email for specific case, otherwise default
-  let clientEmail = 'sam@miadvg.com'; // Default test email
-  if (args.caseId === 'a0jO8000008SZUgIAO') {
-    clientEmail = 'sam@taxrise.com'; // Your email for testing
-  }
-  const clientName = caseRecord.Name || 'Test Client';
-  
-  // Get documents separately
+  // Get documents with full client contact information (mimicking existing Salesforce flow)
   const docQuery = `
-    SELECT Id, Name, Year__c, Status__c, Return_Status__c, Prep_Status__c 
+    SELECT Id, Name, Year__c, Agency__c, Prep_Status__c,
+           Case__r.Client__c, Case__r.Client__r.Name, Case__r.Client__r.PersonEmail, 
+           Case__r.Client__r.AlternateEmail__c, Case__r.Client__r.PersonContactId,
+           (SELECT Id, ContentDocumentId FROM ContentDocumentLinks)
     FROM Document__c 
     WHERE Case__c = '${args.caseId}' AND Prep_Status__c = 'Pending Signatures'
   `;
   
+  console.log('📋 Document query:', docQuery);
   const docResult = await conn.query(docQuery);
-  const unsignedReturns = docResult.records || [];
+  const pendingDocuments = docResult.records || [];
   
-  if (!clientEmail) {
-    throw new Error('No email address found for client');
+  if (!pendingDocuments.length) {
+    return {
+      content: [{
+        type: 'text',
+        text: '❌ No documents found with Prep_Status__c = "Pending Signatures" for this case.'
+      }]
+    };
   }
+
+  // Extract client info from first document (all should have same client)
+  const firstDoc = pendingDocuments[0];
+  const clientName = firstDoc.Case__r?.Client__r?.Name || 'Client';
+  const clientEmail = firstDoc.Case__r?.Client__r?.PersonEmail;
+  const alternateEmail = firstDoc.Case__r?.Client__r?.AlternateEmail__c;
+  const clientId = firstDoc.Case__r?.Client__c;
   
-  // Send email
-  const years = unsignedReturns.map(r => r.Year__c).join(', ');
+  console.log('👤 Client Info:', {
+    name: clientName,
+    email: clientEmail,
+    alternateEmail: alternateEmail,
+    clientId: clientId
+  });
+
+  // Use primary email, fallback to alternate, then test emails
+  let recipientEmail = clientEmail || alternateEmail;
+  if (!recipientEmail) {
+    // Fallback to test emails based on case ID
+    recipientEmail = args.caseId === 'a0jO8000008SZUgIAO' ? 'sam@taxrise.com' : 'sam@miadvg.com';
+    console.log('⚠️ No client email found, using test email:', recipientEmail);
+  }
+
+  // Collect ContentDocument IDs for attachments
+  const contentDocumentIds = new Set();
+  const documentsToUpdate = [];
+  
+  for (const doc of pendingDocuments) {
+    // Mark document as sent (mimicking existing flow)
+    documentsToUpdate.push({
+      Id: doc.Id,
+      Is_Doc_Sent_To_Client__c: true
+    });
+    
+    // Collect attachment IDs
+    if (doc.ContentDocumentLinks) {
+      for (const link of doc.ContentDocumentLinks) {
+        contentDocumentIds.add(link.ContentDocumentId);
+      }
+    }
+  }
+
+  // Fetch file attachments (mimicking existing ContentVersion query)
+  const attachments = [];
+  if (contentDocumentIds.size > 0) {
+    console.log('📎 Fetching attachments for ContentDocument IDs:', Array.from(contentDocumentIds));
+    
+    try {
+      const contentQuery = `
+        SELECT VersionData, FileType, Title, PathOnClient, ContentSize 
+        FROM ContentVersion 
+        WHERE ContentDocumentId IN ('${Array.from(contentDocumentIds).join("','")}')
+        AND IsLatest = true
+      `;
+      
+      const contentResult = await conn.query(contentQuery);
+      console.log(`📎 Found ${contentResult.records.length} file attachments`);
+      
+      for (const file of contentResult.records) {
+        if (file.VersionData) {
+          attachments.push({
+            filename: file.PathOnClient || file.Title,
+            content: Buffer.from(file.VersionData, 'base64'),
+            contentType: getContentType(file.FileType)
+          });
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Error fetching attachments:', error.message);
+    }
+  }
+
+  // Create TaxRise branded email (mimicking existing template)
+  const years = pendingDocuments.map(doc => doc.Year__c).filter(Boolean).join(', ');
+  const agencies = [...new Set(pendingDocuments.map(doc => doc.Agency__c).filter(Boolean))].join(', ');
+  
   const mailOptions = {
-    from: 'sam@miadvg.com',
-    to: clientEmail,
-    subject: `Tax Return Documents - Signature Required (${years})`,
-    html: `
-      <p>Dear ${clientName},</p>
-      <p>Please find your tax return documents attached for the following years: ${years}</p>
-      <p>These documents require your signature. Please review, sign, and return them at your earliest convenience.</p>
-      <p>If you have any questions, please don't hesitate to contact us.</p>
-      <p>Best regards,<br>Tax Preparation Team</p>
-    `
+    from: 'TaxRise <sam@miadvg.com>',  // Mimicking setSenderDisplayName('Tax Rise')
+    to: recipientEmail,
+    subject: `Tax Return Documents - Signature Required (${years})`,  // Mimicking template subject
+    html: createTaxRiseEmailTemplate(clientName, years, agencies, pendingDocuments.length),
+    attachments: attachments
   };
   
-  await emailTransporter.sendMail(mailOptions);
-  
-  return {
-    content: [{
-      type: 'text',
-      text: `✅ Successfully sent tax returns to ${clientEmail} for years: ${years}. Total documents: ${unsignedReturns.length}`
-    }]
+  console.log('📧 Email options:', {
+    to: mailOptions.to,
+    subject: mailOptions.subject,
+    attachmentCount: attachments.length
+  });
+
+  try {
+    // Send email
+    await emailTransporter.sendMail(mailOptions);
+    console.log('✅ Email sent successfully');
+
+    // Update documents to mark as sent (mimicking existing update)
+    if (documentsToUpdate.length > 0) {
+      try {
+        await conn.sobject('Document__c').update(documentsToUpdate);
+        console.log(`✅ Updated ${documentsToUpdate.length} documents as sent`);
+      } catch (updateError) {
+        console.log('⚠️ Error updating document status:', updateError.message);
+      }
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Successfully sent tax returns to ${recipientEmail} for ${clientName}.\n📄 Documents: ${pendingDocuments.length} (${years})\n📎 Attachments: ${attachments.length} files`
+      }]
+    };
+  } catch (error) {
+    console.error('❌ Error sending email:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Error sending email: ${error.message}`
+      }]
+    };
+  }
+}
+
+// Helper function to create TaxRise branded email template (mimicking existing template)
+function createTaxRiseEmailTemplate(clientName, years, agencies, docCount) {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: Arial, sans-serif; color: #333; }
+            .header { background-color: #0c68a7; padding: 20px; text-align: center; }
+            .header h1 { color: white; margin: 0; font-size: 24px; }
+            .content { padding: 30px; background-color: #f9f9f9; }
+            .footer { background-color: #45454f; color: white; padding: 15px; text-align: center; }
+            .highlight { background-color: #e8f4f8; padding: 15px; border-left: 4px solid #0c68a7; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>TaxRise</h1>
+            <p style="color: white; margin: 5px 0;">We rise by lifting others.</p>
+        </div>
+        
+        <div class="content">
+            <p>Hi ${clientName},</p>
+            
+            <div class="highlight">
+                <h3>Tax Return Documents Ready for Signature</h3>
+                <p><strong>Years:</strong> ${years}</p>
+                <p><strong>Agencies:</strong> ${agencies}</p>
+                <p><strong>Total Documents:</strong> ${docCount}</p>
+            </div>
+            
+            <p>Please find your tax return documents attached to this email. These documents require your signature before we can proceed with filing.</p>
+            
+            <p><strong>Next Steps:</strong></p>
+            <ul>
+                <li>Review each attached document carefully</li>
+                <li>Sign and date where indicated</li>
+                <li>Return the signed documents to us as soon as possible</li>
+            </ul>
+            
+            <p>If you have any questions or need assistance, please don't hesitate to contact our Tax Preparation team.</p>
+            
+            <p>Best regards,<br>
+            <strong>TaxRise Tax Preparation Team</strong></p>
+        </div>
+        
+        <div class="footer">
+            <p>© 2024 TaxRise. Every client. Every time.</p>
+        </div>
+    </body>
+    </html>
+  `;
+}
+
+// Helper function to determine content type
+function getContentType(fileType) {
+  const typeMap = {
+    'PDF': 'application/pdf',
+    'WORD_X': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'EXCEL_X': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'PNG': 'image/png',
+    'JPG': 'image/jpeg',
+    'JPEG': 'image/jpeg'
   };
+  return typeMap[fileType] || 'application/octet-stream';
 }
 
 async function handleCreateMailRequest(args) {
