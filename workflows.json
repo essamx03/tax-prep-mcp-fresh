@@ -1,0 +1,158 @@
+{
+  "taxrise_workflows": {
+    "file_tax_return": {
+      "description": "Create tax return documents for a client",
+      "steps": [
+        {
+          "step": 1,
+          "action": "map_intent_to_fields",
+          "params": {
+            "intent": "file tax return",
+            "objectName": "Document__c"
+          },
+          "purpose": "Learn required fields for tax returns"
+        },
+        {
+          "step": 2, 
+          "action": "query_salesforce",
+          "params": {
+            "soql": "SELECT Id, Name FROM Case__c WHERE Client__r.Name LIKE '%{client_name}%' OR Client__r.Phone = '{phone}'"
+          },
+          "purpose": "Find client case"
+        },
+        {
+          "step": 3,
+          "action": "create_records", 
+          "params": {
+            "objectName": "Document__c",
+            "records": [
+              {
+                "Case__c": "{case_id}",
+                "Doc_Category__c": "Tax Prep",
+                "Doc_Type__c": "Tax Return", 
+                "Tax_Year__c": "{year}",
+                "Agency__c": "IRS",
+                "Prep_Status__c": "Draft"
+              }
+            ]
+          },
+          "purpose": "Create tax return document"
+        }
+      ],
+      "success_message": "✓ Created {year} tax return document. Would you like me to email it?"
+    },
+    
+    "check_pending_documents": {
+      "description": "Find documents needing signatures",
+      "steps": [
+        {
+          "step": 1,
+          "action": "query_salesforce",
+          "params": {
+            "soql": "SELECT Name, Tax_Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Prep_Status__c = 'Pending Signatures'"
+          },
+          "purpose": "Find pending signature documents"
+        }
+      ],
+      "success_message": "Found {count} pending documents: {document_list}"
+    },
+
+    "email_tax_returns": {
+      "description": "Email tax return documents to client",
+      "steps": [
+        {
+          "step": 1,
+          "action": "send_returns_to_client",
+          "params": {
+            "caseId": "{case_id}"
+          },
+          "purpose": "Send email with tax returns and TaxRise branding"
+        }
+      ],
+      "success_message": "✓ Emailed tax returns with attachments to your registered email address"
+    },
+
+    "upload_supporting_document": {
+      "description": "Create supporting document records (W2, bank statement, etc.)",
+      "steps": [
+        {
+          "step": 1,
+          "action": "get_document_taxonomy",
+          "params": {
+            "category": "Supporting Documents"
+          },
+          "purpose": "See available document types"
+        },
+        {
+          "step": 2,
+          "action": "map_intent_to_fields",
+          "params": {
+            "intent": "upload {document_type}",
+            "objectName": "Document__c"  
+          },
+          "purpose": "Get proper field mapping"
+        },
+        {
+          "step": 3,
+          "action": "create_records",
+          "params": {
+            "objectName": "Document__c",
+            "records": [
+              {
+                "Case__c": "{case_id}",
+                "Doc_Category__c": "Supporting Documents",
+                "Doc_Type__c": "{document_type}",
+                "Tax_Year__c": "{year}",
+                "Prep_Status__c": "Received"
+              }
+            ]
+          },
+          "purpose": "Create supporting document record"
+        }
+      ],
+      "success_message": "✓ Added {document_type} for {year}"
+    }
+  },
+
+  "common_queries": {
+    "find_client_case": "SELECT Id, Name, Client__r.Name, Client__r.Phone FROM Case__c WHERE Client__r.Name LIKE '%{name}%' OR Client__r.Phone = '{phone}'",
+    "pending_signatures": "SELECT Name, Tax_Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Prep_Status__c = 'Pending Signatures'",
+    "documents_by_year": "SELECT Name, Doc_Type__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Tax_Year__c = '{year}'",
+    "all_case_documents": "SELECT Name, Tax_Year__c, Agency__c, Doc_Type__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' ORDER BY Tax_Year__c DESC"
+  },
+
+  "field_mappings": {
+    "Document__c": {
+      "tax_return": {
+        "Doc_Category__c": "Tax Prep",
+        "Doc_Type__c": "Tax Return",
+        "required_fields": ["Case__c", "Tax_Year__c", "Agency__c"]
+      },
+      "w2": {
+        "Doc_Category__c": "Supporting Documents", 
+        "Doc_Type__c": "W2",
+        "required_fields": ["Case__c", "Tax_Year__c"]
+      },
+      "bank_statement": {
+        "Doc_Category__c": "Supporting Documents",
+        "Doc_Type__c": "Bank Statement", 
+        "required_fields": ["Case__c", "Tax_Year__c"]
+      }
+    }
+  },
+
+  "error_handling": {
+    "case_not_found": {
+      "message": "I couldn't find a case for that client. Could you provide their full name or phone number?",
+      "retry_action": "query_salesforce with different search terms"
+    },
+    "duplicate_document": {
+      "message": "A {doc_type} for {year} already exists. Should I create an amended version?",
+      "check_query": "SELECT Id FROM Document__c WHERE Case__c = '{case_id}' AND Tax_Year__c = '{year}' AND Doc_Type__c = '{doc_type}'"
+    },
+    "invalid_field": {
+      "message": "Let me check the available options for that field.",
+      "retry_action": "describe_object_fields or get_document_taxonomy"
+    }
+  }
+}
