@@ -74,7 +74,7 @@ create_records("Document__c", [
     "Doc_Type__c": "Tax Return",
     "Year__c": "2024",
     "Agency__c": "IRS",
-    "Prep_Status__c": "Draft"
+    "Prep_Status__c": "Pending"
   }
 ])
 ```
@@ -146,9 +146,11 @@ Listen for:
 1. Verify using Case__c custom object (not standard Case)
 2. Check case ID format and validity
 
-### "Invalid field" errors:
-1. Use `get_document_taxonomy` to see valid picklist values
-2. Use `map_intent_to_fields` for proper field combinations
+### "Invalid field" or "bad value for restricted picklist" errors:
+1. Call `describe_object_fields` to see all valid picklist values
+2. Use `get_document_taxonomy` for document-specific values
+3. Use `map_intent_to_fields` for proper field combinations
+4. Common fixes: Use "Pending" not "Draft" for new documents
 
 ## EXAMPLE CORRECTED CONVERSATION:
 

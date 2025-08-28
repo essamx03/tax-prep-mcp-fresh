@@ -32,7 +32,7 @@
                 "Doc_Type__c": "Tax Return", 
                 "Year__c": "{year}",
                 "Agency__c": "IRS",
-                "Prep_Status__c": "Draft"
+                "Prep_Status__c": "Pending"
               }
             ]
           },

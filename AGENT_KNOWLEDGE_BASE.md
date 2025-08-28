@@ -41,7 +41,7 @@ query_salesforce("SELECT Name, Year__c, Agency__c, Prep_Status__c FROM Document_
 - `Doc_Type__c` (picklist - depends on category)
 - `Year__c` (picklist - tax year like 2024, 2023, etc.)
 - `Agency__c` (picklist: IRS, State, etc.)
-- `Prep_Status__c` (picklist: Draft, Pending Signatures, Complete)
+- `Prep_Status__c` (picklist: Pending, Prepared, Approved, Pending Signatures, Signed, etc.)
 
 ### **Case Fields**
 - Use `Case__c` custom object, NOT standard `Case`
@@ -53,7 +53,7 @@ query_salesforce("SELECT Name, Year__c, Agency__c, Prep_Status__c FROM Document_
 ```
 1. map_intent_to_fields("file tax return", "Document__c") 
 2. Find client case: query_salesforce("SELECT Id FROM Case__c WHERE Client__r.Name LIKE '%[name]%'")
-3. create_records("Document__c", [{Case__c: case_id, Doc_Category__c: "Tax Prep", Doc_Type__c: "Tax Return", Year__c: "2024", Agency__c: "IRS", Prep_Status__c: "Draft"}])
+3. create_records("Document__c", [{Case__c: case_id, Doc_Category__c: "Tax Prep", Doc_Type__c: "Tax Return", Year__c: "2024", Agency__c: "IRS", Prep_Status__c: "Pending"}])
 ```
 
 ### "What years need signatures?"

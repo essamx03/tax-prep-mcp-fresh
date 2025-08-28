@@ -506,7 +506,7 @@ async function handleIntentToFields(args) {
         conditional_fields: {
           "Agency__c": "IRS or State (based on user request)",
           "Year__c": "Tax year from user input",
-          "Prep_Status__c": "Pending Signatures (default for new tax returns)"
+          "Prep_Status__c": "Pending (default for new tax returns)"
         },
         business_rule: "Creates records that appear in Tax Prep table for signature workflow"
       },
