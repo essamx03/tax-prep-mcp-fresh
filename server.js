@@ -73,7 +73,7 @@ app.post('/', async (req, res) => {
           tools: [
             // === Schema Discovery Tools ===
             {
-              name: 'sf.describe_global',
+              name: 'describe_global_objects',
               description: 'List all available Salesforce objects with metadata',
               inputSchema: {
                 type: 'object',
@@ -81,7 +81,7 @@ app.post('/', async (req, res) => {
               }
             },
             {
-              name: 'sf.describe_sobject',
+              name: 'describe_object_fields',
               description: 'Get detailed field metadata for a Salesforce object including field types, picklist values, and relationships',
               inputSchema: {
                 type: 'object',
@@ -94,7 +94,7 @@ app.post('/', async (req, res) => {
             
             // === Data Query & Manipulation Tools ===
             {
-              name: 'sf.query',
+              name: 'query_salesforce',
               description: 'Execute SOQL query against Salesforce. Use this to find records, check existing data patterns, etc.',
               inputSchema: {
                 type: 'object',
@@ -106,8 +106,8 @@ app.post('/', async (req, res) => {
               }
             },
             {
-              name: 'sf.create',
-              description: 'Create one or more records in Salesforce. Use sf.describe_sobject first to understand required fields and data types.',
+              name: 'create_records',
+              description: 'Create one or more records in Salesforce. Use describe_object_fields first to understand required fields and data types.',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -122,7 +122,7 @@ app.post('/', async (req, res) => {
               }
             },
             {
-              name: 'sf.update',
+              name: 'update_records',
               description: 'Update existing records in Salesforce. Include Id field in each record.',
               inputSchema: {
                 type: 'object',
@@ -159,7 +159,7 @@ app.post('/', async (req, res) => {
             
             // === Knowledge Base Tools ===
             {
-              name: 'kb.document_taxonomy',
+              name: 'get_document_taxonomy',
               description: 'Get document categories and types for proper classification',
               inputSchema: {
                 type: 'object',
@@ -169,7 +169,7 @@ app.post('/', async (req, res) => {
               }
             },
             {
-              name: 'kb.intent_to_fields',
+              name: 'map_intent_to_fields',
               description: 'Map user intents to required Salesforce field combinations. Use this to understand what fields to set based on what the user wants to do.',
               inputSchema: {
                 type: 'object',
@@ -181,7 +181,7 @@ app.post('/', async (req, res) => {
               }
             },
             {
-              name: 'kb.discover_patterns',
+              name: 'discover_data_patterns',
               description: 'Query existing Salesforce data to discover field patterns and business rules. Use this to learn from existing records.',
               inputSchema: {
                 type: 'object',
@@ -202,24 +202,24 @@ app.post('/', async (req, res) => {
         
         switch (name) {
           // Schema Discovery Tools
-          case 'sf.describe_global':
+          case 'describe_global_objects':
             response.result = await handleDescribeGlobal(args);
             break;
             
-          case 'sf.describe_sobject':
+          case 'describe_object_fields':
             response.result = await handleDescribeObject(args);
             break;
           
           // Data Operations
-          case 'sf.query':
+          case 'query_salesforce':
             response.result = await handleQuery(args);
             break;
             
-          case 'sf.create':
+          case 'create_records':
             response.result = await handleCreate(args);
             break;
             
-          case 'sf.update':
+          case 'update_records':
             response.result = await handleUpdate(args);
             break;
           
@@ -229,15 +229,15 @@ app.post('/', async (req, res) => {
             break;
           
           // Knowledge Base Tools
-          case 'kb.document_taxonomy':
+          case 'get_document_taxonomy':
             response.result = await handleDocumentTaxonomy(args);
             break;
             
-          case 'kb.intent_to_fields':
+          case 'map_intent_to_fields':
             response.result = await handleIntentToFields(args);
             break;
             
-          case 'kb.discover_patterns':
+          case 'discover_data_patterns':
             response.result = await handleDiscoverPatterns(args);
             break;
             
@@ -1179,16 +1179,16 @@ app.listen(port, () => {
   console.log(`🚀 Schema-Aware MCP Server with Dynamic Salesforce Integration running on port ${port}`);
   console.log('📋 Available tools:');
   console.log('  🔍 Schema Discovery:');
-  console.log('    - sf.describe_global (list all objects)');
-  console.log('    - sf.describe_sobject (get field metadata)');
+  console.log('    - describe_global_objects (list all objects)');
+  console.log('    - describe_object_fields (get field metadata)');
   console.log('  📊 Data Operations:');
-  console.log('    - sf.query (execute SOQL)');
-  console.log('    - sf.create (create records)');
-  console.log('    - sf.update (update records)');
+  console.log('    - query_salesforce (execute SOQL)');
+  console.log('    - create_records (create records)');
+  console.log('    - update_records (update records)');
   console.log('  💼 Business Logic:');
   console.log('    - send_returns_to_client (email with attachments)');
   console.log('  📚 Knowledge Base:');
-  console.log('    - kb.document_taxonomy (document categories & types)');
-  console.log('    - kb.intent_to_fields (map user intents to field requirements)');
-  console.log('    - kb.discover_patterns (learn from existing data)');
+  console.log('    - get_document_taxonomy (document categories & types)');
+  console.log('    - map_intent_to_fields (map user intents to field requirements)');
+  console.log('    - discover_data_patterns (learn from existing data)');
 });
