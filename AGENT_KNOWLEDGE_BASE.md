@@ -25,7 +25,7 @@ When user says "file my tax returns" or "create tax documents":
 ### **Document Status Checking**
 When user asks "what documents are pending?":
 ```
-query_salesforce("SELECT Name, Tax_Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '[case_id]' AND Prep_Status__c = 'Pending Signatures'")
+query_salesforce("SELECT Name, Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '[case_id]' AND Prep_Status__c = 'Pending Signatures'")
 ```
 
 ## 📊 Critical Business Rules
@@ -39,7 +39,7 @@ query_salesforce("SELECT Name, Tax_Year__c, Agency__c, Prep_Status__c FROM Docum
 - `Case__c` (lookup to Case__c custom object - NOT standard Case)
 - `Doc_Category__c` (picklist - use get_document_taxonomy to see options)
 - `Doc_Type__c` (picklist - depends on category)
-- `Tax_Year__c` (text/number)
+- `Year__c` (picklist - tax year like 2024, 2023, etc.)
 - `Agency__c` (picklist: IRS, State, etc.)
 - `Prep_Status__c` (picklist: Draft, Pending Signatures, Complete)
 
@@ -52,13 +52,13 @@ query_salesforce("SELECT Name, Tax_Year__c, Agency__c, Prep_Status__c FROM Docum
 ### "File my 2024 tax return"
 ```
 1. map_intent_to_fields("file tax return", "Document__c") 
-2. Find client case: query_salesforce("SELECT Id FROM Case__c WHERE Client__r.Name LIKE '%[name]%' AND Tax_Year__c = '2024'")
-3. create_records("Document__c", [{Case__c: case_id, Doc_Category__c: "Tax Prep", Doc_Type__c: "Tax Return", Tax_Year__c: "2024", Agency__c: "IRS", Prep_Status__c: "Draft"}])
+2. Find client case: query_salesforce("SELECT Id FROM Case__c WHERE Client__r.Name LIKE '%[name]%'")
+3. create_records("Document__c", [{Case__c: case_id, Doc_Category__c: "Tax Prep", Doc_Type__c: "Tax Return", Year__c: "2024", Agency__c: "IRS", Prep_Status__c: "Draft"}])
 ```
 
 ### "What years need signatures?"
 ```
-query_salesforce("SELECT Tax_Year__c, Agency__c, Name FROM Document__c WHERE Case__c = '[case_id]' AND Prep_Status__c = 'Pending Signatures'")
+query_salesforce("SELECT Year__c, Agency__c, Name FROM Document__c WHERE Case__c = '[case_id]' AND Prep_Status__c = 'Pending Signatures'")
 ```
 
 ### "Email my returns"
@@ -69,7 +69,7 @@ send_returns_to_client(case_id)
 ### "Upload bank statement for 2023"
 ```
 1. map_intent_to_fields("upload bank statement", "Document__c")
-2. create_records("Document__c", [{Case__c: case_id, Doc_Category__c: "Supporting Documents", Doc_Type__c: "Bank Statement", Tax_Year__c: "2023", Prep_Status__c: "Received"}])
+2. create_records("Document__c", [{Case__c: case_id, Doc_Category__c: "Supporting Documents", Doc_Type__c: "Bank Statement", Year__c: "2023", Prep_Status__c: "Received"}])
 ```
 
 ## 🚨 Error Prevention
@@ -124,8 +124,8 @@ discover_data_patterns("Document__c", "tax return records", 10) → See how tax 
 **Most Used Queries:**
 - Find pending: `Prep_Status__c = 'Pending Signatures'`
 - Find client case: `Client__r.Name LIKE '%[name]%'` or `Client__r.Phone = '[phone]'`
-- Tax year filter: `Tax_Year__c = '2024'`
+- Tax year filter: `Year__c = '2024'`
 
 **Most Used Fields:**
-- Document__c: `Case__c, Doc_Category__c, Doc_Type__c, Tax_Year__c, Agency__c, Prep_Status__c`
-- Case__c: `Client__r, Tax_Year__c, Status__c`
+- Document__c: `Case__c, Doc_Category__c, Doc_Type__c, Year__c, Agency__c, Prep_Status__c`
+- Case__c: `Client__r, Status__c`

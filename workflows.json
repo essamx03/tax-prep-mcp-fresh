@@ -30,7 +30,7 @@
                 "Case__c": "{case_id}",
                 "Doc_Category__c": "Tax Prep",
                 "Doc_Type__c": "Tax Return", 
-                "Tax_Year__c": "{year}",
+                "Year__c": "{year}",
                 "Agency__c": "IRS",
                 "Prep_Status__c": "Draft"
               }
@@ -49,7 +49,7 @@
           "step": 1,
           "action": "query_salesforce",
           "params": {
-            "soql": "SELECT Name, Tax_Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Prep_Status__c = 'Pending Signatures'"
+            "soql": "SELECT Name, Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Prep_Status__c = 'Pending Signatures'"
           },
           "purpose": "Find pending signature documents"
         }
@@ -102,7 +102,7 @@
                 "Case__c": "{case_id}",
                 "Doc_Category__c": "Supporting Documents",
                 "Doc_Type__c": "{document_type}",
-                "Tax_Year__c": "{year}",
+                "Year__c": "{year}",
                 "Prep_Status__c": "Received"
               }
             ]
@@ -116,9 +116,9 @@
 
   "common_queries": {
     "find_client_case": "SELECT Id, Name, Client__r.Name, Client__r.Phone FROM Case__c WHERE Client__r.Name LIKE '%{name}%' OR Client__r.Phone = '{phone}'",
-    "pending_signatures": "SELECT Name, Tax_Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Prep_Status__c = 'Pending Signatures'",
-    "documents_by_year": "SELECT Name, Doc_Type__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Tax_Year__c = '{year}'",
-    "all_case_documents": "SELECT Name, Tax_Year__c, Agency__c, Doc_Type__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' ORDER BY Tax_Year__c DESC"
+    "pending_signatures": "SELECT Name, Year__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Prep_Status__c = 'Pending Signatures'",
+    "documents_by_year": "SELECT Name, Doc_Type__c, Agency__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' AND Year__c = '{year}'",
+    "all_case_documents": "SELECT Name, Year__c, Agency__c, Doc_Type__c, Prep_Status__c FROM Document__c WHERE Case__c = '{case_id}' ORDER BY Year__c DESC"
   },
 
   "field_mappings": {
@@ -126,17 +126,17 @@
       "tax_return": {
         "Doc_Category__c": "Tax Prep",
         "Doc_Type__c": "Tax Return",
-        "required_fields": ["Case__c", "Tax_Year__c", "Agency__c"]
+        "required_fields": ["Case__c", "Year__c", "Agency__c"]
       },
       "w2": {
         "Doc_Category__c": "Supporting Documents", 
         "Doc_Type__c": "W2",
-        "required_fields": ["Case__c", "Tax_Year__c"]
+        "required_fields": ["Case__c", "Year__c"]
       },
       "bank_statement": {
         "Doc_Category__c": "Supporting Documents",
         "Doc_Type__c": "Bank Statement", 
-        "required_fields": ["Case__c", "Tax_Year__c"]
+        "required_fields": ["Case__c", "Year__c"]
       }
     }
   },
@@ -148,7 +148,7 @@
     },
     "duplicate_document": {
       "message": "A {doc_type} for {year} already exists. Should I create an amended version?",
-      "check_query": "SELECT Id FROM Document__c WHERE Case__c = '{case_id}' AND Tax_Year__c = '{year}' AND Doc_Type__c = '{doc_type}'"
+      "check_query": "SELECT Id FROM Document__c WHERE Case__c = '{case_id}' AND Year__c = '{year}' AND Doc_Type__c = '{doc_type}'"
     },
     "invalid_field": {
       "message": "Let me check the available options for that field.",
