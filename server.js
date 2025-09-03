@@ -53,7 +53,7 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
   } else {
-    next();
+  next();
   }
 });
 
@@ -62,17 +62,22 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    version: '2.4.0-document-automation',
+    version: '2.4.1-secure-communication',
     phases: {
       phase1: 'Essential MCP tools - COMPLETE',
       phase2: 'SMS automation - COMPLETE', 
       phase3: 'Client intelligence - COMPLETE',
-      phase4: 'Document automation - COMPLETE',
+      phase4: 'Secure communication workflows - COMPLETE',
       phase5: 'Advanced features - PENDING'
     },
+    security: {
+      auto_sms: 'DISABLED',
+      sms_verification: 'REQUIRED',
+      communication_preference: 'REQUIRED'
+    },
     tools: {
-      total: 15,
-      automation_workflows: 2
+      total: 17,
+      secure_workflows: 4
     }
   });
 });
@@ -83,7 +88,7 @@ app.post('/', async (req, res) => {
   
   const { method, params, id } = req.body;
   let response = { jsonrpc: '2.0', id };
-  
+
   try {
     switch (method) {
       case 'initialize':
@@ -255,7 +260,7 @@ app.post('/', async (req, res) => {
              },
              {
                name: 'handle_irs_notice',
-               description: 'Complete IRS notice workflow: log notice + automatically send SMS with upload link',
+               description: 'Log IRS notice in system and ask client for preferred communication method',
                inputSchema: {
                  type: 'object',
                  properties: {
@@ -271,8 +276,8 @@ app.post('/', async (req, res) => {
                }
              },
              {
-               name: 'auto_create_document_request',
-               description: 'Automatically create document request and send SMS when client mentions needing to upload documents',
+               name: 'create_document_request',
+               description: 'Create document request and ask client for preferred communication method',
                inputSchema: {
                  type: 'object',
                  properties: {
@@ -285,7 +290,36 @@ app.post('/', async (req, res) => {
                  },
                  required: ['clientName', 'phoneNumber', 'accountId', 'caseId', 'documentType']
                }
-             }
+             },
+             {
+               name: 'verify_phone_last_4',
+               description: 'Verify client identity by asking for last 4 digits of phone number on file',
+               inputSchema: {
+                 type: 'object',
+                 properties: {
+                   phoneNumber: { type: 'string', description: 'Full phone number on file' },
+                   clientProvidedLast4: { type: 'string', description: 'Last 4 digits provided by client' }
+                 },
+                 required: ['phoneNumber', 'clientProvidedLast4']
+               }
+             },
+             {
+               name: 'send_secure_communication',
+               description: 'Send SMS or Email after client preference and verification is complete',
+               inputSchema: {
+                 type: 'object',
+                 properties: {
+                   clientName: { type: 'string', description: 'Client name' },
+                   method: { type: 'string', enum: ['sms', 'email'], description: 'Communication method (sms or email)' },
+                   phoneNumber: { type: 'string', description: 'Client phone number (for SMS)' },
+                   email: { type: 'string', description: 'Client email address (for Email)' },
+                   accountId: { type: 'string', description: 'Client account ID' },
+                   messageType: { type: 'string', enum: ['irs_notice', 'document_request', 'payment_reminder'], description: 'Type of message' },
+                   context: { type: 'object', description: 'Additional context (noticeType, documentType, amount, etc.)' }
+                 },
+                 required: ['clientName', 'method', 'accountId', 'messageType']
+              }
+            }
           ]
         };
         break;
@@ -302,10 +336,10 @@ app.post('/', async (req, res) => {
             response.result = await handleSendReturns(args);
             break;
             
-                     case 'create_mail_request':
-             response.result = await handleCreateMailRequest(args);
-             break;
-             
+          case 'create_mail_request':
+            response.result = await handleCreateMailRequest(args);
+            break;
+            
            case 'get_last_call_attempt':
              response.result = await handleGetLastCallAttempt(args);
              break;
@@ -346,12 +380,20 @@ app.post('/', async (req, res) => {
              response.result = await handleIRSNotice(args);
              break;
              
-           case 'auto_create_document_request':
-             response.result = await handleAutoCreateDocumentRequest(args);
+           case 'create_document_request':
+             response.result = await handleCreateDocumentRequest(args);
              break;
              
-           default:
-             response.error = { code: -32601, message: `Unknown tool: ${name}` };
+           case 'verify_phone_last_4':
+             response.result = await handleVerifyPhoneLast4(args);
+             break;
+             
+           case 'send_secure_communication':
+             response.result = await handleSendSecureCommunication(args);
+             break;
+             
+          default:
+            response.error = { code: -32601, message: `Unknown tool: ${name}` };
         }
         break;
         
@@ -378,8 +420,8 @@ async function handleGetPendingCases(args) {
       FROM Case__c 
       WHERE Status = 'Pending Client Signature'
     `;
-    
-    if (args.caseId) {
+  
+  if (args.caseId) {
       query += ` AND Id = '${args.caseId}'`;
     } else if (args.phoneNumber) {
       const cleanPhone = args.phoneNumber.replace(/[^\d]/g, '');
@@ -403,10 +445,10 @@ async function handleGetPendingCases(args) {
         status: c.Status,
         createdDate: c.CreatedDate
       }));
-      
-      return {
-        content: [{
-          type: 'text',
+
+  return {
+    content: [{
+      type: 'text',
           text: `Found ${cases.length} cases pending signatures:\n${JSON.stringify(cases, null, 2)}`
         }]
       };
@@ -434,28 +476,28 @@ async function handleSendReturns(args) {
     console.log('📧 Sending tax returns for case:', args.caseId);
     
     // Get case details including contact and account
-    const caseQuery = `
+  const caseQuery = `
       SELECT Id, CaseNumber, Contact.Name, Contact.Email, Contact.AccountId,
              Subject, Status
       FROM Case__c 
       WHERE Id = '${args.caseId}'
       LIMIT 1
-    `;
-    
-    const caseResult = await conn.query(caseQuery);
+  `;
+  
+  const caseResult = await conn.query(caseQuery);
     
     if (!caseResult.records || caseResult.records.length === 0) {
       throw new Error(`Case not found: ${args.caseId}`);
-    }
-    
-    const caseRecord = caseResult.records[0];
+  }
+  
+  const caseRecord = caseResult.records[0];
     const clientEmail = args.clientEmail || caseRecord.Contact?.Email;
     const clientName = args.clientName || caseRecord.Contact?.Name || 'Valued Client';
     const accountId = caseRecord.Contact?.AccountId;
-    
-    if (!clientEmail) {
-      throw new Error('No email address found for client');
-    }
+  
+  if (!clientEmail) {
+    throw new Error('No email address found for client');
+  }
     
     // Prepare email with TaxRise direct links
     const docudropLink = accountId ? `https://docudrop.taxrise.com/${accountId}/verify` : 'https://docudrop.taxrise.com';
@@ -491,21 +533,21 @@ async function handleSendReturns(args) {
         </div>
       </div>
     `;
-    
-    // Send email
-    const mailOptions = {
-      from: 'sam@miadvg.com',
-      to: clientEmail,
+  
+  // Send email
+  const mailOptions = {
+    from: 'sam@miadvg.com',
+    to: clientEmail,
       subject: `Your Tax Return Documents - Case ${caseRecord.CaseNumber}`,
       html: emailHtml,
       text: `Dear ${clientName}, your tax return documents are ready. Upload documents: ${docudropLink}. Make payments: ${paymentLink}`
-    };
-    
-    await emailTransporter.sendMail(mailOptions);
-    
-    return {
-      content: [{
-        type: 'text',
+  };
+  
+  await emailTransporter.sendMail(mailOptions);
+  
+  return {
+    content: [{
+      type: 'text',
         text: `✅ Tax returns successfully sent to ${clientEmail} for case ${caseRecord.CaseNumber}. Email includes TaxRise direct links for document upload and payments.`
       }]
     };
@@ -525,21 +567,21 @@ async function handleCreateMailRequest(args) {
     console.log('📮 Creating mail request for case:', args.caseId);
     
     // Get case and contact details including account
-    const caseQuery = `
+  const caseQuery = `
       SELECT Id, CaseNumber, Contact.Name, Contact.MailingAddress, 
              Contact.AccountId, Subject
       FROM Case__c 
       WHERE Id = '${args.caseId}'
       LIMIT 1
-    `;
-    
-    const caseResult = await conn.query(caseQuery);
+  `;
+  
+  const caseResult = await conn.query(caseQuery);
     
     if (!caseResult.records || caseResult.records.length === 0) {
       throw new Error(`Case not found: ${args.caseId}`);
-    }
-    
-    const caseRecord = caseResult.records[0];
+  }
+  
+  const caseRecord = caseResult.records[0];
     const clientAddress = args.clientAddress || 
       `${caseRecord.Contact?.MailingAddress?.street || ''} ${caseRecord.Contact?.MailingAddress?.city || ''} ${caseRecord.Contact?.MailingAddress?.state || ''} ${caseRecord.Contact?.MailingAddress?.postalCode || ''}`.trim();
     
@@ -746,11 +788,11 @@ async function handleLookupClientByPhone(args) {
       state: client.PersonMailingState,
       activeCases: client.Cases__r ? client.Cases__r.length : 0,
       caseDetails: client.Cases__r || []
-    };
-    
-    return {
-      content: [{
-        type: 'text',
+  };
+  
+  return {
+    content: [{
+      type: 'text',
         text: `✅ Client found: ${client.Name}
         
 📧 Email: ${client.PersonEmail || 'Not provided'}
@@ -916,7 +958,7 @@ async function handleVerifyClientIdentity(args) {
   }
 }
 
-// Phase 4: Document Automation Handlers
+// Phase 4: Secure Document Automation Handlers (NO AUTO-SMS)
 async function handleIRSNotice(args) {
   try {
     console.log('📄 Processing IRS Notice workflow for:', args.clientName, 'Notice:', args.noticeType);
@@ -938,31 +980,17 @@ async function handleIRSNotice(args) {
       throw new Error(`Failed to create IRS notice record: ${createResult.errors}`);
     }
     
-    // Step 2: Automatically send SMS with upload link
-    const uploadMessage = `Hi ${args.clientName}! I've logged your ${args.noticeType} notice in our system. Our resolution team will review it within 4 hours.
-
-Please upload a copy of the notice here: https://docudrop.taxrise.com/${args.accountId}/verify
-
-This secure link will help our team address your notice effectively. Questions? Reply to this message!
-
-- TaxRise Team`;
-
-    console.log('📱 Auto-sending SMS for IRS notice...');
-    const smsResult = await handleSendSMS({
-      phoneNumber: args.phoneNumber,
-      message: uploadMessage
-    });
-    
+    // Step 2: Ask for communication preference (NO AUTO-SMS)
     return {
       content: [{
         type: 'text',
-        text: `✅ IRS Notice Workflow Complete!
+        text: `✅ Perfect! I've logged your ${args.noticeType} notice in our system (ID: ${createResult.id}). Our resolution team will review it within 4 hours.
 
-📄 Logged ${args.noticeType} notice (ID: ${createResult.id})
-📱 SMS sent to ${args.clientName} with secure upload link
-⏰ Resolution team will review within 4 hours
+To send you the secure upload link, would you prefer to receive it via:
+1️⃣ Text message (SMS) 
+2️⃣ Email
 
-The client has been automatically notified and can upload the notice using the secure link sent via SMS.`
+Which would work better for you?`
       }]
     };
     
@@ -977,9 +1005,9 @@ The client has been automatically notified and can upload the notice using the s
   }
 }
 
-async function handleAutoCreateDocumentRequest(args) {
+async function handleCreateDocumentRequest(args) {
   try {
-    console.log('📄 Auto-creating document request for:', args.clientName, 'Document:', args.documentType);
+    console.log('📄 Creating document request for:', args.clientName, 'Document:', args.documentType);
     
     // Step 1: Create the document request record
     const documentRecord = {
@@ -988,7 +1016,7 @@ async function handleAutoCreateDocumentRequest(args) {
       Doc_Type__c: args.documentType,
       Name: `${args.documentType} - ${args.clientName}`,
       Status__c: 'Requested',
-      Description__c: `Document request: ${args.documentType}. Reason: ${args.reason || 'Client mentioned needing to upload documents'}. Auto-created from client interaction.`
+      Description__c: `Document request: ${args.documentType}. Reason: ${args.reason || 'Client mentioned needing to upload documents'}.`
     };
     
     console.log('📋 Creating document request:', documentRecord);
@@ -998,30 +1026,17 @@ async function handleAutoCreateDocumentRequest(args) {
       throw new Error(`Failed to create document request: ${createResult.errors}`);
     }
     
-    // Step 2: Automatically send SMS with upload link
-    const uploadMessage = `Hi ${args.clientName}! I've created a request for your ${args.documentType} in our system.
-
-Please upload it securely here: https://docudrop.taxrise.com/${args.accountId}/verify
-
-This will help us move your case forward quickly. Questions? Reply to this message!
-
-- TaxRise Team`;
-
-    console.log('📱 Auto-sending document request SMS...');
-    const smsResult = await handleSendSMS({
-      phoneNumber: args.phoneNumber,
-      message: uploadMessage
-    });
-    
+    // Step 2: Ask for communication preference (NO AUTO-SMS)
     return {
       content: [{
         type: 'text',
-        text: `✅ Document Request Workflow Complete!
+        text: `✅ Great! I've created a request for your ${args.documentType} in our system (ID: ${createResult.id}).
 
-📄 Created ${args.documentType} request (ID: ${createResult.id})
-📱 SMS sent to ${args.clientName} with secure upload link
+To send you the secure upload link, would you prefer to receive it via:
+1️⃣ Text message (SMS)
+2️⃣ Email
 
-The client can now upload their documents using the secure link sent via SMS.`
+Which would work better for you?`
       }]
     };
     
@@ -1031,6 +1046,127 @@ The client can now upload their documents using the secure link sent via SMS.`
       content: [{
         type: 'text',
         text: `❌ Error creating document request: ${error.message}`
+      }]
+    };
+  }
+}
+
+async function handleVerifyPhoneLast4(args) {
+  try {
+    console.log('🔐 Verifying phone last 4:', args.clientProvidedLast4, 'against:', args.phoneNumber);
+    
+    // Extract last 4 digits from phone number on file
+    const phoneOnFile = args.phoneNumber.replace(/[^\d]/g, '');
+    const last4OnFile = phoneOnFile.slice(-4);
+    
+    const clientLast4 = args.clientProvidedLast4.replace(/[^\d]/g, '');
+    
+    if (clientLast4 === last4OnFile) {
+      return {
+        content: [{
+          type: 'text',
+          text: `✅ Perfect! That matches our records. I can now send you the secure link via text message.`
+        }]
+      };
+    } else {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Those digits don't match what we have on file. For security reasons, I'll send the link via email instead. Is that okay?`
+        }]
+      };
+    }
+    
+  } catch (error) {
+    console.error('❌ Phone verification error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Unable to verify phone number. Let me send the link via email for security.`
+      }]
+    };
+  }
+}
+
+async function handleSendSecureCommunication(args) {
+  try {
+    console.log('📱 Sending secure communication via:', args.method, 'for:', args.messageType);
+    
+    const { clientName, accountId, messageType, context } = args;
+    let message, subject;
+    
+    // Generate message based on type
+    if (messageType === 'irs_notice') {
+      const noticeType = context?.noticeType || 'IRS Notice';
+      message = `Hi ${clientName}! I've logged your ${noticeType} in our system. Our resolution team will review it within 4 hours.
+
+Please upload a copy here: https://docudrop.taxrise.com/${accountId}/verify
+
+Questions? Reply to this message!
+
+- TaxRise Team`;
+      
+      subject = `${noticeType} - Secure Upload Link`;
+      
+    } else if (messageType === 'document_request') {
+      const docType = context?.documentType || 'document';
+      message = `Hi ${clientName}! I've created a request for your ${docType} in our system.
+
+Please upload it securely here: https://docudrop.taxrise.com/${accountId}/verify
+
+This will help us move your case forward quickly. Questions? Reply!
+
+- TaxRise Team`;
+      
+      subject = `${docType} Request - Secure Upload Link`;
+      
+    } else if (messageType === 'payment_reminder') {
+      const amount = context?.amount || 'payment';
+      const dueDate = context?.dueDate || 'soon';
+      message = `Hi ${clientName}! Your payment of $${amount} is due on ${dueDate}.
+
+Make your payment securely here: https://payment.taxrise.com/${accountId}
+
+Questions about your payment? Reply to this message!
+
+- TaxRise Team`;
+      
+      subject = `Payment Reminder - $${amount}`;
+    }
+    
+    if (args.method === 'sms') {
+      const smsResult = await handleSendSMS({
+        phoneNumber: args.phoneNumber,
+        message: message
+      });
+      
+      return {
+        content: [{
+          type: 'text',
+          text: `✅ SMS sent successfully to ${clientName}! You should receive the secure link within a few seconds. Please check your phone and let me know if you don't receive it.`
+        }]
+      };
+      
+    } else if (args.method === 'email') {
+      const emailResult = await handleSendReturns({
+        caseId: args.caseId || 'manual',
+        email: args.email
+      });
+      
+      return {
+        content: [{
+          type: 'text',
+          text: `✅ Email sent successfully to ${args.email}! You should receive the secure link within a few minutes. Please check your inbox (and spam folder) and let me know if you don't receive it.`
+        }]
+      };
+    }
+    
+  } catch (error) {
+    console.error('❌ Secure communication error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Error sending secure communication: ${error.message}`
       }]
     };
   }
@@ -1113,8 +1249,8 @@ Questions about your payment? Reply to this message!
 }
 
 app.listen(port, () => {
-  console.log(`🚀 Emily MCP Server - Phase 4 Complete - running on port ${port}`);
-  console.log(`📊 Version: 2.4.0-document-automation`);
+  console.log(`🚀 Emily MCP Server - Phase 4 Secure - running on port ${port}`);
+  console.log(`📊 Version: 2.4.1-secure-communication`);
   console.log('');
   console.log('📋 Available MCP Tools:');
   console.log('  📄 Business Logic:');
@@ -1123,17 +1259,19 @@ app.listen(port, () => {
   console.log('    - create_mail_request (physical mail requests)');
   console.log('  📞 Communication:');
   console.log('    - get_last_call_attempt (TalkDesk call history)');
-  console.log('  📱 SMS Automation:');
-  console.log('    - send_sms (send SMS to clients)');
+  console.log('  📱 SMS Capabilities (Manual Only):');
+  console.log('    - send_sms (send SMS to clients after verification)');
   console.log('    - send_document_request_sms (document requests with upload link)');
   console.log('    - send_payment_reminder_sms (payment reminders with payment link)');
   console.log('  👤 Client Intelligence:');
   console.log('    - lookup_client_by_phone (comprehensive client lookup)');
   console.log('    - get_client_greeting (personalized greetings)');
   console.log('    - verify_client_identity (phone + ZIP verification)');
-  console.log('  🤖 Document Automation:');
-  console.log('    - handle_irs_notice (complete IRS notice workflow + auto SMS)');
-  console.log('    - auto_create_document_request (auto create + SMS for documents)');
+  console.log('  🔐 Secure Document Workflows:');
+  console.log('    - handle_irs_notice (log notice + ask communication preference)');
+  console.log('    - create_document_request (create request + ask preference)');
+  console.log('    - verify_phone_last_4 (verify last 4 digits for SMS security)');
+  console.log('    - send_secure_communication (send SMS/Email after verification)');
   console.log('  🔧 Essential Tools:');
   console.log('    - query_salesforce (dynamic SOQL queries)');
   console.log('    - create_records (create documents, cases, etc.)');
@@ -1141,6 +1279,7 @@ app.listen(port, () => {
   console.log('✅ Phase 1: Essential MCP tools - COMPLETE');
   console.log('✅ Phase 2: Hey Market SMS automation - COMPLETE');
   console.log('✅ Phase 3: Client intelligence & personalized greetings - COMPLETE');
-  console.log('✅ Phase 4: Document automation & IRS notice workflows - COMPLETE');
+  console.log('✅ Phase 4: Secure communication workflows - COMPLETE');
+  console.log('🔐 Security: All SMS requires client preference + phone verification');
   console.log('🔗 Health check: http://localhost:' + port + '/health');
 });
