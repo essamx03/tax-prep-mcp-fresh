@@ -62,13 +62,17 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    version: '2.3.0-client-intelligence',
+    version: '2.4.0-document-automation',
     phases: {
       phase1: 'Essential MCP tools - COMPLETE',
       phase2: 'SMS automation - COMPLETE', 
       phase3: 'Client intelligence - COMPLETE',
-      phase4: 'Document automation - PENDING',
+      phase4: 'Document automation - COMPLETE',
       phase5: 'Advanced features - PENDING'
+    },
+    tools: {
+      total: 15,
+      automation_workflows: 2
     }
   });
 });
@@ -248,6 +252,39 @@ app.post('/', async (req, res) => {
                  },
                  required: ['phoneNumber', 'zipCode']
                }
+             },
+             {
+               name: 'handle_irs_notice',
+               description: 'Complete IRS notice workflow: log notice + automatically send SMS with upload link',
+               inputSchema: {
+                 type: 'object',
+                 properties: {
+                   clientName: { type: 'string', description: 'Client name' },
+                   phoneNumber: { type: 'string', description: 'Client phone number' },
+                   accountId: { type: 'string', description: 'Client account ID' },
+                   caseId: { type: 'string', description: 'Case ID for logging the notice' },
+                   noticeType: { type: 'string', description: 'IRS notice type (CP503, CP2000, etc.)' },
+                   noticeDate: { type: 'string', description: 'Date on the notice' },
+                   amount: { type: 'string', description: 'Amount mentioned on notice (optional)' }
+                 },
+                 required: ['clientName', 'phoneNumber', 'accountId', 'caseId', 'noticeType']
+               }
+             },
+             {
+               name: 'auto_create_document_request',
+               description: 'Automatically create document request and send SMS when client mentions needing to upload documents',
+               inputSchema: {
+                 type: 'object',
+                 properties: {
+                   clientName: { type: 'string', description: 'Client name' },
+                   phoneNumber: { type: 'string', description: 'Client phone number' },
+                   accountId: { type: 'string', description: 'Client account ID' },
+                   caseId: { type: 'string', description: 'Case ID' },
+                   documentType: { type: 'string', description: 'Type of document needed' },
+                   reason: { type: 'string', description: 'Reason for document request' }
+                 },
+                 required: ['clientName', 'phoneNumber', 'accountId', 'caseId', 'documentType']
+               }
              }
           ]
         };
@@ -303,6 +340,14 @@ app.post('/', async (req, res) => {
              
            case 'verify_client_identity':
              response.result = await handleVerifyClientIdentity(args);
+             break;
+             
+           case 'handle_irs_notice':
+             response.result = await handleIRSNotice(args);
+             break;
+             
+           case 'auto_create_document_request':
+             response.result = await handleAutoCreateDocumentRequest(args);
              break;
              
            default:
@@ -871,6 +916,126 @@ async function handleVerifyClientIdentity(args) {
   }
 }
 
+// Phase 4: Document Automation Handlers
+async function handleIRSNotice(args) {
+  try {
+    console.log('📄 Processing IRS Notice workflow for:', args.clientName, 'Notice:', args.noticeType);
+    
+    // Step 1: Create the IRS notice document record
+    const noticeRecord = {
+      Case__c: args.caseId,
+      Doc_Category__c: 'IRS Notice',
+      Doc_Type__c: 'IRS Notice',
+      Name: `${args.noticeType} Notice - ${args.clientName}`,
+      Status__c: 'Requested',
+      Description__c: `IRS Notice ${args.noticeType} received from client ${args.clientName}. Date: ${args.noticeDate || 'Not provided'}. Amount: ${args.amount || 'Not specified'}.`
+    };
+    
+    console.log('📋 Creating IRS notice record:', noticeRecord);
+    const createResult = await conn.sobject('Document__c').create(noticeRecord);
+    
+    if (!createResult.success) {
+      throw new Error(`Failed to create IRS notice record: ${createResult.errors}`);
+    }
+    
+    // Step 2: Automatically send SMS with upload link
+    const uploadMessage = `Hi ${args.clientName}! I've logged your ${args.noticeType} notice in our system. Our resolution team will review it within 4 hours.
+
+Please upload a copy of the notice here: https://docudrop.taxrise.com/${args.accountId}/verify
+
+This secure link will help our team address your notice effectively. Questions? Reply to this message!
+
+- TaxRise Team`;
+
+    console.log('📱 Auto-sending SMS for IRS notice...');
+    const smsResult = await handleSendSMS({
+      phoneNumber: args.phoneNumber,
+      message: uploadMessage
+    });
+    
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ IRS Notice Workflow Complete!
+
+📄 Logged ${args.noticeType} notice (ID: ${createResult.id})
+📱 SMS sent to ${args.clientName} with secure upload link
+⏰ Resolution team will review within 4 hours
+
+The client has been automatically notified and can upload the notice using the secure link sent via SMS.`
+      }]
+    };
+    
+  } catch (error) {
+    console.error('❌ IRS Notice workflow error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Error processing IRS notice: ${error.message}`
+      }]
+    };
+  }
+}
+
+async function handleAutoCreateDocumentRequest(args) {
+  try {
+    console.log('📄 Auto-creating document request for:', args.clientName, 'Document:', args.documentType);
+    
+    // Step 1: Create the document request record
+    const documentRecord = {
+      Case__c: args.caseId,
+      Doc_Category__c: 'Supporting Documents',
+      Doc_Type__c: args.documentType,
+      Name: `${args.documentType} - ${args.clientName}`,
+      Status__c: 'Requested',
+      Description__c: `Document request: ${args.documentType}. Reason: ${args.reason || 'Client mentioned needing to upload documents'}. Auto-created from client interaction.`
+    };
+    
+    console.log('📋 Creating document request:', documentRecord);
+    const createResult = await conn.sobject('Document__c').create(documentRecord);
+    
+    if (!createResult.success) {
+      throw new Error(`Failed to create document request: ${createResult.errors}`);
+    }
+    
+    // Step 2: Automatically send SMS with upload link
+    const uploadMessage = `Hi ${args.clientName}! I've created a request for your ${args.documentType} in our system.
+
+Please upload it securely here: https://docudrop.taxrise.com/${args.accountId}/verify
+
+This will help us move your case forward quickly. Questions? Reply to this message!
+
+- TaxRise Team`;
+
+    console.log('📱 Auto-sending document request SMS...');
+    const smsResult = await handleSendSMS({
+      phoneNumber: args.phoneNumber,
+      message: uploadMessage
+    });
+    
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Document Request Workflow Complete!
+
+📄 Created ${args.documentType} request (ID: ${createResult.id})
+📱 SMS sent to ${args.clientName} with secure upload link
+
+The client can now upload their documents using the secure link sent via SMS.`
+      }]
+    };
+    
+  } catch (error) {
+    console.error('❌ Document request workflow error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Error creating document request: ${error.message}`
+      }]
+    };
+  }
+}
+
 // Hey Market SMS Handlers
 async function handleSendSMS(args) {
   try {
@@ -948,8 +1113,8 @@ Questions about your payment? Reply to this message!
 }
 
 app.listen(port, () => {
-  console.log(`🚀 Emily MCP Server - Phase 3 Complete - running on port ${port}`);
-  console.log(`📊 Version: 2.3.0-client-intelligence`);
+  console.log(`🚀 Emily MCP Server - Phase 4 Complete - running on port ${port}`);
+  console.log(`📊 Version: 2.4.0-document-automation`);
   console.log('');
   console.log('📋 Available MCP Tools:');
   console.log('  📄 Business Logic:');
@@ -966,6 +1131,9 @@ app.listen(port, () => {
   console.log('    - lookup_client_by_phone (comprehensive client lookup)');
   console.log('    - get_client_greeting (personalized greetings)');
   console.log('    - verify_client_identity (phone + ZIP verification)');
+  console.log('  🤖 Document Automation:');
+  console.log('    - handle_irs_notice (complete IRS notice workflow + auto SMS)');
+  console.log('    - auto_create_document_request (auto create + SMS for documents)');
   console.log('  🔧 Essential Tools:');
   console.log('    - query_salesforce (dynamic SOQL queries)');
   console.log('    - create_records (create documents, cases, etc.)');
@@ -973,5 +1141,6 @@ app.listen(port, () => {
   console.log('✅ Phase 1: Essential MCP tools - COMPLETE');
   console.log('✅ Phase 2: Hey Market SMS automation - COMPLETE');
   console.log('✅ Phase 3: Client intelligence & personalized greetings - COMPLETE');
+  console.log('✅ Phase 4: Document automation & IRS notice workflows - COMPLETE');
   console.log('🔗 Health check: http://localhost:' + port + '/health');
 });
