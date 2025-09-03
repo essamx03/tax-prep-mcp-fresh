@@ -62,7 +62,14 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    version: '2.2.0-sms-automation'
+    version: '2.3.0-client-intelligence',
+    phases: {
+      phase1: 'Essential MCP tools - COMPLETE',
+      phase2: 'SMS automation - COMPLETE', 
+      phase3: 'Client intelligence - COMPLETE',
+      phase4: 'Document automation - PENDING',
+      phase5: 'Advanced features - PENDING'
+    }
   });
 });
 
@@ -205,6 +212,42 @@ app.post('/', async (req, res) => {
                  },
                  required: ['phoneNumber', 'clientName', 'accountId', 'amount', 'dueDate']
                }
+             },
+             {
+               name: 'lookup_client_by_phone',
+               description: 'Look up client information by phone number for personalized service',
+               inputSchema: {
+                 type: 'object',
+                 properties: {
+                   phoneNumber: { type: 'string', description: 'Client phone number to look up' }
+                 },
+                 required: ['phoneNumber']
+               }
+             },
+             {
+               name: 'get_client_greeting',
+               description: 'Generate personalized greeting for client based on their information',
+               inputSchema: {
+                 type: 'object',
+                 properties: {
+                   phoneNumber: { type: 'string', description: 'Client phone number for lookup' },
+                   clientName: { type: 'string', description: 'Client name (optional, will be looked up if not provided)' },
+                   callType: { type: 'string', description: 'Type of call/interaction (inbound, outbound, callback, etc.)', default: 'inbound' }
+                 },
+                 required: ['phoneNumber']
+               }
+             },
+             {
+               name: 'verify_client_identity',
+               description: 'Verify client identity using phone number and ZIP code',
+               inputSchema: {
+                 type: 'object',
+                 properties: {
+                   phoneNumber: { type: 'string', description: 'Client phone number' },
+                   zipCode: { type: 'string', description: 'ZIP code for verification' }
+                 },
+                 required: ['phoneNumber', 'zipCode']
+               }
              }
           ]
         };
@@ -248,6 +291,18 @@ app.post('/', async (req, res) => {
              
            case 'send_payment_reminder_sms':
              response.result = await handleSendPaymentReminderSMS(args);
+             break;
+             
+           case 'lookup_client_by_phone':
+             response.result = await handleLookupClientByPhone(args);
+             break;
+             
+           case 'get_client_greeting':
+             response.result = await handleGetClientGreeting(args);
+             break;
+             
+           case 'verify_client_identity':
+             response.result = await handleVerifyClientIdentity(args);
              break;
              
            default:
@@ -597,6 +652,225 @@ Results: ${JSON.stringify(results, null, 2)}`;
   }
 }
 
+// Phase 3: Client Intelligence Handlers
+async function handleLookupClientByPhone(args) {
+  try {
+    console.log('👤 Looking up client by phone:', args.phoneNumber);
+    
+    // Clean phone number for search (remove formatting)
+    const cleanPhone = args.phoneNumber.replace(/[^\d]/g, '');
+    
+    // Comprehensive client lookup query
+    const clientQuery = `
+      SELECT Id, Name, PersonEmail, PersonMobilePhone, Phone, 
+             PersonMailingPostalCode, PersonMailingCity, PersonMailingState,
+             Home_Zip_Code__c, PersonBirthdate, AccountSource,
+             (SELECT Id, CaseNumber, Status, Subject, CreatedDate 
+              FROM Cases__r 
+              WHERE Status != 'Closed' 
+              ORDER BY CreatedDate DESC LIMIT 3)
+      FROM Account 
+      WHERE (PersonMobilePhone LIKE '%${cleanPhone}%' 
+             OR Phone LIKE '%${cleanPhone}%'
+             OR PersonMobilePhone LIKE '%${args.phoneNumber}%'
+             OR Phone LIKE '%${args.phoneNumber}%')
+      ORDER BY CreatedDate DESC
+      LIMIT 1
+    `;
+    
+    console.log('📋 Client lookup query:', clientQuery);
+    const result = await conn.query(clientQuery);
+    
+    if (!result.records || result.records.length === 0) {
+      return {
+        content: [{
+          type: 'text',
+          text: `No client found matching phone number ${args.phoneNumber}. This might be a new client or the phone number may not be updated in our system.`
+        }]
+      };
+    }
+    
+    const client = result.records[0];
+    const clientInfo = {
+      accountId: client.Id,
+      name: client.Name,
+      email: client.PersonEmail,
+      phone: client.PersonMobilePhone || client.Phone,
+      zipCode: client.PersonMailingPostalCode || client.Home_Zip_Code__c,
+      city: client.PersonMailingCity,
+      state: client.PersonMailingState,
+      activeCases: client.Cases__r ? client.Cases__r.length : 0,
+      caseDetails: client.Cases__r || []
+    };
+    
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Client found: ${client.Name}
+        
+📧 Email: ${client.PersonEmail || 'Not provided'}
+📱 Phone: ${client.PersonMobilePhone || client.Phone}
+📍 ZIP: ${client.PersonMailingPostalCode || client.Home_Zip_Code__c}
+🏙️  City: ${client.PersonMailingCity || 'Not provided'}, ${client.PersonMailingState || ''}
+📂 Active Cases: ${client.Cases__r ? client.Cases__r.length : 0}
+
+Client Details: ${JSON.stringify(clientInfo, null, 2)}`
+      }]
+    };
+    
+  } catch (error) {
+    console.error('❌ Client lookup error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Error looking up client: ${error.message}`
+      }]
+    };
+  }
+}
+
+async function handleGetClientGreeting(args) {
+  try {
+    console.log('👋 Generating personalized greeting for:', args.phoneNumber);
+    
+    let clientName = args.clientName;
+    let clientInfo = null;
+    
+    // If no name provided, look up the client
+    if (!clientName) {
+      const lookupResult = await handleLookupClientByPhone({ phoneNumber: args.phoneNumber });
+      
+      // Parse the client info from the lookup result
+      if (lookupResult.content[0].text.includes('Client found:')) {
+        const clientText = lookupResult.content[0].text;
+        const nameMatch = clientText.match(/Client found: (.+?)\n/);
+        if (nameMatch) {
+          clientName = nameMatch[1];
+          
+          // Extract additional info for context
+          const emailMatch = clientText.match(/📧 Email: (.+?)\n/);
+          const zipMatch = clientText.match(/📍 ZIP: (.+?)\n/);
+          const casesMatch = clientText.match(/📂 Active Cases: (\d+)/);
+          
+          clientInfo = {
+            name: clientName,
+            email: emailMatch ? emailMatch[1] : null,
+            zip: zipMatch ? zipMatch[1] : null,
+            activeCases: casesMatch ? parseInt(casesMatch[1]) : 0
+          };
+        }
+      }
+    }
+    
+    // Generate personalized greeting based on call type
+    let greeting = '';
+    const callType = args.callType || 'inbound';
+    
+    if (!clientName || clientName === 'Not provided') {
+      // New or unidentified client greeting
+      switch (callType) {
+        case 'inbound':
+          greeting = `Hi! Thank you for calling TaxRise, where we rise by lifting others. I'm Emily, your virtual tax resolution assistant. May I please get your name and the phone number on your account so I can better assist you today?`;
+          break;
+        case 'outbound':
+          greeting = `Hi! This is Emily from TaxRise calling. Am I speaking with the person responsible for the tax matters at this number? I'm reaching out to discuss your tax resolution case.`;
+          break;
+        default:
+          greeting = `Hello! This is Emily from TaxRise. How can I help you with your tax resolution needs today?`;
+      }
+    } else {
+      // Personalized greeting for known client
+      const firstName = clientName.split(' ')[0];
+      
+      switch (callType) {
+        case 'inbound':
+          if (clientInfo && clientInfo.activeCases > 0) {
+            greeting = `Hi ${firstName}! This is Emily from TaxRise. I can see you have ${clientInfo.activeCases} active case${clientInfo.activeCases > 1 ? 's' : ''} with us. How can I help you today?`;
+          } else {
+            greeting = `Hi ${firstName}! This is Emily from TaxRise, where we rise by lifting others. It's great to hear from you! How can I assist you with your tax resolution needs today?`;
+          }
+          break;
+        case 'outbound':
+          greeting = `Hi ${firstName}! This is Emily from TaxRise calling on a recorded line. Am I speaking with ${clientName}? I'm calling to follow up on your tax resolution case.`;
+          break;
+        case 'callback':
+          greeting = `Hi ${firstName}! This is Emily from TaxRise returning your call. Thank you for reaching out to us! How can I help you today?`;
+          break;
+        default:
+          greeting = `Hi ${firstName}! This is Emily from TaxRise. It's wonderful to speak with you again! How can I help you today?`;
+      }
+    }
+    
+    return {
+      content: [{
+        type: 'text',
+        text: greeting
+      }]
+    };
+    
+  } catch (error) {
+    console.error('❌ Greeting generation error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `Hi! This is Emily from TaxRise, where we rise by lifting others. How can I help you with your tax resolution needs today?`
+      }]
+    };
+  }
+}
+
+async function handleVerifyClientIdentity(args) {
+  try {
+    console.log('🔐 Verifying client identity:', args.phoneNumber, 'ZIP:', args.zipCode);
+    
+    // Clean phone number and ZIP code
+    const cleanPhone = args.phoneNumber.replace(/[^\d]/g, '');
+    const cleanZip = args.zipCode.replace(/[^\d]/g, '');
+    
+    // Verify client identity using phone and ZIP
+    const verificationQuery = `
+      SELECT Id, Name, PersonEmail, PersonMobilePhone, Phone,
+             PersonMailingPostalCode, Home_Zip_Code__c
+      FROM Account 
+      WHERE (PersonMobilePhone LIKE '%${cleanPhone}%' 
+             OR Phone LIKE '%${cleanPhone}%')
+        AND (PersonMailingPostalCode LIKE '${cleanZip}%' 
+             OR Home_Zip_Code__c LIKE '${cleanZip}%')
+      LIMIT 1
+    `;
+    
+    console.log('📋 Identity verification query:', verificationQuery);
+    const result = await conn.query(verificationQuery);
+    
+    if (!result.records || result.records.length === 0) {
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Identity verification failed. The phone number ${args.phoneNumber} and ZIP code ${args.zipCode} combination doesn't match our records. Please verify the information and try again, or I can help you locate your account using just your name.`
+        }]
+      };
+    }
+    
+    const client = result.records[0];
+    
+    return {
+      content: [{
+        type: 'text',
+        text: `✅ Identity verified! Hi ${client.Name}! I've confirmed your identity using your phone number and ZIP code. Your account ID is ${client.Id}. How can I help you today?`
+      }]
+    };
+    
+  } catch (error) {
+    console.error('❌ Identity verification error:', error);
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Unable to verify identity at this time: ${error.message}. Let me try to help you in another way.`
+      }]
+    };
+  }
+}
+
 // Hey Market SMS Handlers
 async function handleSendSMS(args) {
   try {
@@ -674,8 +948,8 @@ Questions about your payment? Reply to this message!
 }
 
 app.listen(port, () => {
-  console.log(`🚀 Emily MCP Server - Phase 2 Complete - running on port ${port}`);
-  console.log(`📊 Version: 2.2.0-sms-automation`);
+  console.log(`🚀 Emily MCP Server - Phase 3 Complete - running on port ${port}`);
+  console.log(`📊 Version: 2.3.0-client-intelligence`);
   console.log('');
   console.log('📋 Available MCP Tools:');
   console.log('  📄 Business Logic:');
@@ -688,11 +962,16 @@ app.listen(port, () => {
   console.log('    - send_sms (send SMS to clients)');
   console.log('    - send_document_request_sms (document requests with upload link)');
   console.log('    - send_payment_reminder_sms (payment reminders with payment link)');
+  console.log('  👤 Client Intelligence:');
+  console.log('    - lookup_client_by_phone (comprehensive client lookup)');
+  console.log('    - get_client_greeting (personalized greetings)');
+  console.log('    - verify_client_identity (phone + ZIP verification)');
   console.log('  🔧 Essential Tools:');
   console.log('    - query_salesforce (dynamic SOQL queries)');
   console.log('    - create_records (create documents, cases, etc.)');
   console.log('');
   console.log('✅ Phase 1: Essential MCP tools - COMPLETE');
   console.log('✅ Phase 2: Hey Market SMS automation - COMPLETE');
+  console.log('✅ Phase 3: Client intelligence & personalized greetings - COMPLETE');
   console.log('🔗 Health check: http://localhost:' + port + '/health');
 });
