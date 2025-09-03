@@ -319,6 +319,79 @@ app.post('/', async (req, res) => {
                  },
                  required: ['clientName', 'method', 'accountId', 'messageType']
               }
+            },
+            // 🔐 SECURE WORKFLOW TOOLS (Phase 4)
+            {
+              name: 'handle_irs_notice',
+              description: 'Log IRS notice in system and ask client for preferred communication method (SMS or Email). NEVER auto-sends SMS.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  clientName: { type: 'string', description: 'Client name' },
+                  phoneNumber: { type: 'string', description: 'Client phone number' },
+                  accountId: { type: 'string', description: 'Account ID for the client' },
+                  caseId: { type: 'string', description: 'Case ID (optional, will be looked up)' },
+                  noticeType: { type: 'string', description: 'Type of IRS notice (CP503, CP504, etc.)' },
+                  noticeDate: { type: 'string', description: 'Date on the notice (optional)' },
+                  amount: { type: 'string', description: 'Amount mentioned on notice (optional)' }
+                },
+                required: ['clientName', 'phoneNumber', 'noticeType']
+              }
+            },
+            {
+              name: 'create_document_request',
+              description: 'Create document request and ask client for preferred communication method (SMS or Email). NEVER auto-sends SMS.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  clientName: { type: 'string', description: 'Client name' },
+                  phoneNumber: { type: 'string', description: 'Client phone number' },
+                  accountId: { type: 'string', description: 'Account ID for the client' },
+                  caseId: { type: 'string', description: 'Case ID (optional, will be looked up)' },
+                  documentType: { type: 'string', description: 'Type of document being requested' },
+                  priority: { type: 'string', description: 'Priority level (Normal, High, Urgent)', default: 'Normal' }
+                },
+                required: ['clientName', 'phoneNumber', 'documentType']
+              }
+            },
+            {
+              name: 'verify_phone_last_4',
+              description: 'Verify client identity by asking for last 4 digits of phone number on file. Required before sending SMS.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  phoneNumber: { type: 'string', description: 'Client phone number on file' },
+                  last4Provided: { type: 'string', description: 'Last 4 digits provided by client' }
+                },
+                required: ['phoneNumber', 'last4Provided']
+              }
+            },
+            {
+              name: 'send_secure_communication',
+              description: 'Send SMS or Email ONLY after client preference and verification is complete. Never call directly - use workflow tools first.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  method: { type: 'string', description: 'Communication method: sms or email' },
+                  phoneNumber: { type: 'string', description: 'Client phone number (required for SMS)' },
+                  email: { type: 'string', description: 'Client email address (required for email)' },
+                  clientName: { type: 'string', description: 'Client name for personalization' },
+                  messageType: { type: 'string', description: 'Type of message: irs_notice, document_request, payment_reminder' },
+                  context: { 
+                    type: 'object', 
+                    description: 'Context object containing specific details',
+                    properties: {
+                      accountId: { type: 'string', description: 'Account ID for links' },
+                      caseId: { type: 'string', description: 'Case ID if available' },
+                      noticeType: { type: 'string', description: 'IRS notice type (for irs_notice)' },
+                      documentType: { type: 'string', description: 'Document type (for document_request)' },
+                      amount: { type: 'string', description: 'Payment amount (for payment_reminder)' },
+                      dueDate: { type: 'string', description: 'Due date (for payment_reminder)' }
+                    }
+                  }
+                },
+                required: ['method', 'clientName', 'messageType', 'context']
+              }
             }
           ]
         };
