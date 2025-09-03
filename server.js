@@ -62,7 +62,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    version: '2.4.1-secure-communication',
+    version: '2.4.2-secure-workflow-deploy',
     phases: {
       phase1: 'Essential MCP tools - COMPLETE',
       phase2: 'SMS automation - COMPLETE', 
