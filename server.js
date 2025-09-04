@@ -96,6 +96,10 @@ app.post('/', async (req, res) => {
           protocolVersion: '2024-11-05',
           capabilities: {
             tools: {}
+          },
+          serverInfo: {
+            name: 'taxrise-mcp-server',
+            version: '1.0.0'
           }
         };
         break;
