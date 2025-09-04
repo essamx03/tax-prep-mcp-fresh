@@ -14,17 +14,15 @@ const conn = new jsforce.Connection({
 });
 
 // Email configuration
-/*
 const emailTransporter = nodemailer.createTransporter({
   host: 'smtp.gmail.com',
   port: 587,
   secure: false,
   auth: {
-    user: 'sam@miadvg.com',
-    pass: 'vihp qsst hsdl ajtw'
+    user: process.env.EMAIL_USER || 'sam@miadvg.com',
+    pass: process.env.EMAIL_PASS || 'vihp qsst hsdl ajtw'
   }
 });
-*/
 // Hey Market SMS Configuration
 const HEYMARKET_API_URL = 'https://api.heymarket.com/v1';
 const HEYMARKET_SECRET_ID = 'bc39ab97-03cd-471e-be68-8d3b559e7de2';
