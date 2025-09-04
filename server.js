@@ -14,6 +14,7 @@ const conn = new jsforce.Connection({
 });
 
 // Email configuration
+/*
 const emailTransporter = nodemailer.createTransporter({
   host: 'smtp.gmail.com',
   port: 587,
@@ -23,7 +24,7 @@ const emailTransporter = nodemailer.createTransporter({
     pass: 'vihp qsst hsdl ajtw'
   }
 });
-
+*/
 // Hey Market SMS Configuration
 const HEYMARKET_API_URL = 'https://api.heymarket.com/v1';
 const HEYMARKET_SECRET_ID = 'bc39ab97-03cd-471e-be68-8d3b559e7de2';
